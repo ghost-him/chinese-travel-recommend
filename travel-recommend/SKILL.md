@@ -1,7 +1,7 @@
 ---
 name: travel-recommend
 description: 按用户画像、出行时间、假期长度、同行者所在地推荐目的地，并交付可直接打开的图文 HTML 报告（行程、风土人情、交通票价、费用估算、路线地图）。用于「元旦/春节去哪」「帮我规划几天行程」「两个人从不同城市出发在哪会合」「预算 X 元能去哪」这类请求。
-version: 1.7.0
+version: 1.8.0
 license: MIT
 triggers:
   - 用户给出日期/假期长度，询问去哪、怎么排、要花多少钱
@@ -40,10 +40,16 @@ travel-recommend/
 ├─ SKILL.md                     # 方法论：输入契约 / 组群 / 行程 / 票价 / 验证
 ├─ assets/report-template/      # 报告模板（index.html + css + js + 占位图）
 │  └─ README.md                 # 模板怎么填
+├─ assets/attractions/          # 景点库（可查询的中国景点池）
+│  ├─ attractions.jsonl         # 主库：名称/别名/省份/类型/标签/介绍/来源
+│  ├─ sources.md                # 来源与可用性（构建脚本生成）
+│  └─ README.md                 # 字段说明与用法
 ├─ prompts/                     # 子 agent 提示词（独立文件，不塞进 SKILL.md）
 │  ├─ season-factcheck.md       # 给用户看名单前的季节/闭园/证件核查
 │  └─ final-review.md           # 交付前的整体审核
 ├─ scripts/                     # Python（标准库 + requests/json5/Pillow，uv 直接跑）
+│  ├─ build_attractions.py      # 抓榜单 → 解析 → 去重 → 打标签 → 补介绍 → JSONL
+│  ├─ attractions.py            # 查库：按省/类型/标签/关键词，排除去过、找同类替代
 │  ├─ fetch_rail_fares.py
 │  ├─ fetch_images.py           # 精确文件名（File:xxx）
 │  ├─ fetch_images_search.py    # 关键词检索抓图（多源并发 + 熔断）
@@ -261,6 +267,35 @@ over_i(d)   = cost_i(d) - cap_i(d)
 
 `worst_time(d) = max_i time_i(d)` 只用于「谁更辛苦」的提示，不再单独决定排序。
 如果某位同行者的在途超过其声明上限，直接淘汰该目的地；如果只是预算不同，不要替用户砍掉——把差额写出来。
+
+### 2.4 景点库：先查库，再联网，再谈推荐
+
+`assets/attractions/attractions.jsonl` 是一个可查询的中国景点池（160 条起，字段见该目录 README）：
+名称 / 别名 / 省份 / 城市 / 类型 / 标签 / 60–150 字介绍 / 来源链接。
+**候选景点不该由模型凭印象临时挑**——先查库，库里有就直接用；库里没有才联网补，补完写回库。
+
+```bash
+uv run --no-project scripts/attractions.py                              # 概览：多少条、哪些省份/类型/标签
+uv run --no-project scripts/attractions.py --province 浙江 --type 山岳
+uv run --no-project scripts/attractions.py --tag 冰雪 --tag 摄影
+uv run --no-project scripts/attractions.py --exclude 丽江,平遥            # 用户去过 → 直接排除
+uv run --no-project scripts/attractions.py --similar 长白山               # 同省同类型替代
+uv run --no-project scripts/attractions.py --suggest 8 --seed 7          # 没有目标时每类抽一个
+uv run --no-project scripts/attractions.py --missing-intro               # 还缺介绍的条目
+```
+
+规则：
+
+1. **第 0 问之后、组群之前先查库**：用户点名的地名用 `--name` 查（含别名），能查到就带着它的类型与卖点进入组群；
+2. **用户说「去过 X / 不想去 X」**：`--exclude X` 排除，再用 `--similar X` 找同省同类型的替代，按 2.6 的规则**整群替换**；
+3. **库里没有的景点**：`build_attractions.py --enrich` 或人工联网补介绍，写回库并注明 `sources[]`；不要用模型记忆硬写；
+4. **库只回答「是什么、在哪、为什么值得」**；门票、开放时间、预约规则、限流仍按第 5 节实查官方公告，不得把榜单当公告；
+5. 库里的介绍要**改写成本次行程语境**（与风土人情呼应），不要原样复制榜单的排比句。
+
+维护：`build_attractions.py` 负责抓取/解析/去重/打标签/补介绍；`sources.md` 记录来源与可用性，
+被反爬拦下的站点（知乎、百度百科、今日头条）不要写进 `SOURCES`。
+
+
 
 ### 2.5 组群：推荐单位是「地点群」，不是城市
 
@@ -551,6 +586,7 @@ travel-report/
 18. 用户点名的候选即使超预算也在列表里、有完整方案，并写清超出金额与原因；
 19. 给用户确认名单前，有子 agent 预审结果（季节/闭园/交通/证件）；交付前有第二次整体审核记录；
 20. 地图模式已问过用户；SVG 模式离线可开，amap 模式有 key 并标注需联网；**选了 amap 却没给 key 时判不合格——必须回问 key，或拿到用户明确同意后才降级为 SVG**。
+21. 候选景点来过处：**先查 `assets/attractions/attractions.jsonl`**（`attractions.py --name`），库里没有才联网补；用户说过去过的地方用 `--exclude` 排除、`--similar` 找替代，并在报告「已替你排除」里写清。
 
 ### 8. 交付前二次审核 + 打包（硬步骤）
 
@@ -570,6 +606,8 @@ travel-report/
 
 | 脚本 | 作用 | 典型用法 |
 |---|---|---|
+| `build_attractions.py` | 抓取公开榜单 → 解析 → 去重 → 打标签 → 维基补介绍，生成景点库 JSONL | `uv run --no-project scripts/build_attractions.py --enrich` |
+| `attractions.py` | 查景点库：按省/类型/标签/关键词筛选，排除去过的地方，找同类替代 | `uv run --no-project scripts/attractions.py --similar 长白山` |
 | `fetch_rail_fares.py` | 12306 车次 + 各席别实价；自动带 cookie、核对实际发车站；空结果时提示「可能未开售」 | `uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 泉州南 2026-11-25 O` |
 | `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重、生成可直接粘贴的 credits；`--keep-credits` 增量补图 | `uv run --no-project scripts/fetch_images.py images manifest.tsv --sleep 4` |
 | `fetch_images_search.py` | **多源检索抓图**（Commons 搜索 / Commons 分类 / Openverse / 维基条目首图），各自限速 + 熔断 + md5 去重 + 署名；清单格式 `<slug>\|<检索词>\|<张数>` | `uv run --no-project scripts/fetch_images_search.py images manifest.tsv --sleep 4` |
@@ -710,3 +748,10 @@ travel-report/
 - **新脚本**：`fetch_images_search.py`（多源抓图）、`fetch_geo.py`（维基 + Wikidata 坐标）、`optimize_images.py`（74MB → 20MB 级压缩）。
 - **修脚本**：`fetch_rail_fares.py` 区分「超预售期返回 HTML」与「无车」；12306 不再按 from/to 过滤时，零匹配给出终到站分布。
 - **新增「已固化的坑」表**：Windows 下 `/c/...` 被当 `C:\c\...`、`uv run -c` 不合法、tab 选择器要用 `.tab-name`、headless WebKit 无 TLS 不能验在线地图等。
+
+### 1.8.0（2026-11-18）
+
+- **新增景点库**：`assets/attractions/attractions.jsonl`（160 条，字段：名称 / 别名 / 省份 / 城市 / 类型 / 标签 / 60–150 字介绍 / 来源）。用途：候选景点先查库，用户说「去过 X」时直接排除并给同类替代，不再由模型凭印象临时挑。
+- **新增脚本**：`build_attractions.py`（抓公开榜单 → 解析 → 去重 → 规则打标签 → 维基补缺失介绍）与 `attractions.py`（按省/类型/标签/关键词查询，`--exclude` 排除去过、`--similar` 找同省同类型替代、`--suggest` 每类抽一个）。
+- **新增 SKILL 2.4**「先查库，再联网，再谈推荐」与验证清单第 21 条。
+- **来源可用性实测**：携程攻略、搜狐两篇榜单、买购网表格可用；知乎专栏 403、百度百科反爬挑战页、今日头条正文需 JS → 不写入来源。
