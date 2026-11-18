@@ -152,8 +152,27 @@ def html_to_lines(html: str) -> list[str]:
     return [line for line in lines if line]
 
 
-# 来源自带的错字；右侧为正确写法
-NAME_FIX = {"戈阳龟峰": "弋阳龟峰"}
+# 来源自带的错字 / 带省市前缀的名字；右侧为规范名（原名会进 aliases，检索不受影响）
+NAME_FIX = {
+    "戈阳龟峰": "弋阳龟峰",
+    # 省市前缀：城市信息在 city 字段里，名字只留景点名
+    "云南石林": "石林",
+    "北京颐和园": "颐和园",
+    "天津盘山": "盘山",
+    "安徽齐云山": "齐云山",
+    "浙江天台山": "天台山",
+    "青岛崂山": "崂山",
+    "洛阳白云山": "白云山",
+    "洛阳老君山": "老君山",
+    "焦作云台山": "云台山",
+    "保定白石山": "白石山",
+    "涞水县野三坡": "野三坡",
+    "新疆可可托海": "可可托海",
+    "无锡太湖鼋头渚": "鼋头渚",
+    "大连金石滩": "金石滩",
+    # 「西递宏村皖南古村落」是 5A 的合并写法；宏村另有条目，这里保留西递
+    "西递宏村皖南古村落": "西递",
+}
 
 # 同一景区/同一事物的重复条目：左侧并入右侧（左侧进 aliases，不丢检索能力）
 DUP_TARGET = {
@@ -163,6 +182,7 @@ DUP_TARGET = {
     "长城": "万里长城",
     "神农架国家级自然保护区": "神农架",
     "苍山洱海": "洱海",
+    "武陵源": "张家界",
 }
 
 # 关键词规则判错的类型，用人工纠偏覆盖（只覆盖明确的错判）
@@ -171,6 +191,18 @@ TYPE_OVERRIDE = {
     "东方明珠塔": "城市地标",   # 规则命中「塔」→ 古建筑
     "夫子庙-秦淮风光带": "古村镇",
     "承德避暑山庄": "园林",     # 规则命中「山」→ 山岳
+    "阿尔山柴河": "综合",       # 5A 景区（火山/森林/温泉），不是一座山
+    "房山世界地质公园": "综合",
+    "三星堆": "博物馆",
+    "日月潭": "湖泊",           # 规则未命中「湖」，落进「综合」
+    "天山天池": "湖泊",         # 冰碛湖，规则命中「山」
+    "桂林山水": "综合",
+    "亚龙湾": "综合",           # 海湾，不是海岛
+    "老虎滩海洋公园": "综合",
+    "金石滩": "综合",           # 海滨，不是海岛
+    "白哈巴": "古村镇",
+    "扎尕那": "古村镇",
+    "鼋头渚": "湖泊",           # 太湖边的半岛，规则改名后丢了「湖」字
 }
 
 
@@ -179,7 +211,8 @@ def canonical_name(raw: str) -> tuple[str, str]:
     clean = clean_name(raw)
     fixed = NAME_FIX.get(clean, clean)
     name = DUP_TARGET.get(fixed, fixed)
-    return name, (fixed if fixed != name else "")
+    name = NAME_FIX.get(name, name)  # 合并目标本身可能还带省市前缀（昆明石林 → 云南石林 → 石林）
+    return name, (clean if clean != name else "")
 
 
 def clean_name(raw: str) -> str:
@@ -278,6 +311,32 @@ def _core(text: str) -> str:
     return text
 
 
+DISAMBIG = re.compile(r"^.{2,14}(可以指|可能指|常指|是指不同的)")
+# 影视/书籍条目：西柏坡曾配到「《走出西柏坡》」这部 2001 年的电影
+CREATIVE = re.compile(r"^《|^.{0,8}(电影|影片|电视剧|小说|歌曲|专辑)")
+
+
+def is_creative_work(extract: str) -> bool:
+    return bool(CREATIVE.match(extract[:30]))
+
+
+def intro_conflicts(intro: str, province: str) -> bool:
+    """只检查「位于/地处」后面的地点短语，避免把「北距温州市 150 公里」当成省份冲突。"""
+    if not province:
+        return False
+    match = re.search(r"(?:位于|地处|坐落于|座落于)([^。；;，,、]{0,24})", intro[:90])
+    if not match:
+        return False
+    span = match.group(1)
+    for prov in PROVINCES:
+        if prov != province and prov in span:
+            return True
+    for city, prov in CITY_HINTS.items():
+        if prov != province and city in span:
+            return True
+    return False
+
+
 def wiki_title_ok(name: str, title: str) -> bool:
     """只接受与景点同一实体的页面标题。
 
@@ -287,6 +346,13 @@ def wiki_title_ok(name: str, title: str) -> bool:
     """
     n, t = _core(name), _core(title)
     if not n or not t:
+        return False
+    # 交通/行政条目不是景点：同里站、广州长隆站、XX 机场
+    if re.search(r"(站|车站|机场|地铁|港口|码头|线路|铁路)$", title):
+        return False
+    # 行政级别条目：光雾山镇、嶂石岩镇、泰宁县（记录名本身带这个字则放行，如南浔古镇）
+    admin = re.search(r"(县|镇|乡|街道|社区|区)$", title)
+    if admin and not re.search(re.escape(admin.group(1)) + "$", name):
         return False
     if n == t:
         return True
@@ -301,14 +367,15 @@ def wiki_title_from_url(url: str) -> str:
     return unquote(tail).replace("_", " ")
 
 
-def wiki_intro(name: str) -> tuple[str, str, str] | None:
-    """维基补介绍：先按标题精确查，对不上再走搜索。返回 (介绍, 标题, 链接)。"""
+def wiki_intro(name: str, province: str = "") -> tuple[str, str, str] | None:
+    """维基补介绍：标题精确查 + 搜索候选，取与景点名最接近且通过校验的那条。"""
     queries = [
         {"action": "query", "prop": "extracts", "exintro": "1", "explaintext": "1",
          "titles": name, "format": "json", "redirects": "1"},
-        {"action": "query", "generator": "search", "gsrsearch": name, "gsrlimit": "1",
+        {"action": "query", "generator": "search", "gsrsearch": name, "gsrlimit": "5",
          "prop": "extracts", "exintro": "1", "explaintext": "1", "format": "json"},
     ]
+    best: tuple[float, str, str, str] | None = None
     for params in queries:
         try:
             payload = requests.get("https://zh.wikipedia.org/w/api.php", params=params,
@@ -318,9 +385,14 @@ def wiki_intro(name: str) -> tuple[str, str, str] | None:
         for page in ((payload.get("query") or {}).get("pages") or {}).values():
             extract = re.sub(r"\s+", "", (page.get("extract") or "").strip())
             title = page.get("title", name)
-            if len(extract) > 40 and wiki_title_ok(name, title):
-                return extract, title, "https://zh.wikipedia.org/wiki/" + title.replace(" ", "_")
-    return None
+            if len(extract) <= 40 or not wiki_title_ok(name, title):
+                continue
+            if DISAMBIG.match(extract) or is_creative_work(extract) or intro_conflicts(extract, province):
+                continue
+            score = 2.0 if _core(title) == _core(name) else SequenceMatcher(None, _core(name), _core(title)).ratio()
+            if best is None or score > best[0]:
+                best = (score, extract, title, "https://zh.wikipedia.org/wiki/" + title.replace(" ", "_"))
+    return best[1:] if best else None
 
 
 NAME_PROVINCE = {
@@ -399,6 +471,8 @@ def province_of(name: str, address: str = "", hinted: str = "") -> str:
 
 def city_of(address: str, province: str) -> str:
     """从地址里取地级市（有地址才有值；没有就留空，不猜）。"""
+    if province in {"北京", "上海", "天津", "重庆", "香港", "澳门"}:
+        return province  # 直辖市/特区没有地级市这一层
     if not address:
         return ""
     rest = address
@@ -552,7 +626,12 @@ def main() -> int:
         if wiki_title and not wiki_title_ok(record["name"], wiki_title):
             print(f"  丢弃错配的维基介绍：{record['name']} ← {wiki_title}", file=sys.stderr)
             continue
-        record["intro"] = clean_intro(old["intro"])
+        reused = clean_intro(old["intro"])
+        if DISAMBIG.match(reused) or is_creative_work(reused) or intro_conflicts(reused, record["province"]):
+            print(f"  丢弃错配的维基介绍：{record['name']} ← {wiki_title}（消歧义/省份冲突）",
+                  file=sys.stderr)
+            continue
+        record["intro"] = reused
         record["introSource"] = "zh.wikipedia"
         for src in (old.get("sources") or [])[:2]:
             if src not in record["sources"]:
@@ -566,7 +645,7 @@ def main() -> int:
         print(f"  用维基百科补 {len(missing)} 条介绍…", file=sys.stderr)
         filled = 0
         for record in missing:
-            found = wiki_intro(record["name"])
+            found = wiki_intro(record["name"], record["province"])
             if found:
                 intro, title, url = found
                 record["intro"] = clean_intro(intro)

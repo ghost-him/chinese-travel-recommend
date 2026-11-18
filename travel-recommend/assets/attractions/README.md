@@ -36,7 +36,7 @@ uv run --no-project scripts/attractions.py --exclude 丽江,平遥 --province �
 # 用户去过泸沽湖 → 找同省同类型的替代
 uv run --no-project scripts/attractions.py --similar 泸沽湖
 
-# 完全没有目标时：整表入上下文（154 行 ≈ 8.9k 字符），自己横向比
+# 完全没有目标时：整表入上下文（153 条 ≈ 10.1k 字符），自己横向比
 uv run --no-project scripts/attractions.py --all --format compact
 
 # 只想每类抽一个做提示
