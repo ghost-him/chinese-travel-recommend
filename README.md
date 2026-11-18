@@ -83,9 +83,9 @@ Non-negotiable steps:
 travel-report/
 ├─ index.html          # opens offline (except amap mode)
 ├─ css/style.css
-├─ js/data.js          # ★ the only file to edit: profile / clusters / itinerary / fares / credits
+├─ js/data.js          # ★ the only file to edit: profile / clusters / itinerary / fares
 ├─ js/app.js           # rendering logic
-├─ images/             # 4–6 per attraction (6–10 for landmarks), credited one by one
+├─ images/             # 4–6 per attraction (6–10 for landmarks), no attribution needed
 └─ README.md           # sources, assumptions, how to edit
 ```
 
@@ -120,14 +120,14 @@ Paths are relative to this README; the skill itself lives in `chinese-travel-rec
 | `build_attractions.py` | Scrape public rankings → parse → dedupe → tag → enrich intros → JSONL |
 | `attractions.py` | Query the library by province/type/tag/keyword; exclude visited, find alternatives; `--all --format compact` dumps the whole pool |
 | `fetch_rail_fares.py` | 12306 trains and per-class fares, with cookie handling and real departure-station checks |
-| `fetch_images.py` | Bulk Commons download by exact file name; rate limit, retry, md5 dedupe, credits |
-| `fetch_images_search.py` | Multi-source image search (Commons / Commons categories / Openverse / Wikipedia lead image) |
+| `fetch_images.py` | Bulk Commons download by exact file name; rate limit, retry, md5 dedupe |
+| `fetch_images_search.py` | Multi-source image search (Commons / Commons categories / Openverse / Wikipedia lead image); no topic filtering — the AI inspects every image |
 | `fetch_geo.py` | Name → coordinates (Wikipedia coordinates, Wikidata P625 fallback) |
 | `optimize_images.py` | Downscale/compress images before packaging |
-| `verify_report.py` | Static self-check: files, images, credits, duplicate images, external links, placeholders, price structure |
+| `verify_report.py` | Static self-check: files, images, duplicate images, external links, placeholders, price structure |
 | `package_report.py` | Self-check then zip, keeping the top-level folder |
 | `calc_budget.py` | Recompute the budget with the same formula as the page |
-| `lib.py` | Shared helpers (HTTP session, retry, md5, credit cleaning) |
+| `lib.py` | Shared helpers (HTTP session, retry, md5) |
 
 ---
 
@@ -142,8 +142,8 @@ uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 黄山北 2026-11-2
 # Images: manifest lines are slug|Commons file name|width
 uv run --no-project scripts/fetch_images.py ../travel-report/images manifest.tsv --sleep 4
 
-# Top up images without losing existing credits
-uv run --no-project scripts/fetch_images_search.py ../travel-report/images more.tsv --keep-credits
+# Top up images (existing files are kept, numbering continues)
+uv run --no-project scripts/fetch_images_search.py ../travel-report/images more.tsv
 
 # Attraction library
 uv run --no-project scripts/attractions.py --province 浙江 --type 山岳

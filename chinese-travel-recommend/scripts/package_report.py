@@ -51,7 +51,7 @@ def main() -> int:
         out.unlink()
     entries = 0
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        skip_names = {".DS_Store", ".seen-md5", "credits.jsonl", "credits.snippet.js", "manifest.json"}
+        skip_names = {".DS_Store", ".seen-md5", "manifest.json"}
         for path in sorted(report.rglob("*")):
             if not path.is_file() or path.resolve() == out:
                 continue

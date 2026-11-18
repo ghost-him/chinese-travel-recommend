@@ -163,7 +163,7 @@
     <div class="wrap">
       <div class="sec-head">
         <span class="sec-no">05</span>
-        <h2 class="sec-title">数据来源、图片许可与二次使用</h2>
+        <h2 class="sec-title">数据来源与怎么改</h2>
       </div>
 
       <div class="profile-grid">
@@ -172,7 +172,7 @@
           <div class="kv-list" style="margin-top:12px">
             <div class="kv"><span class="k">车次票价</span><span class="v">中国铁路 12306 官方接口（queryG / queryTicketPrice），查询时间 <b id="src-query">—</b></span></div>
             <div class="kv"><span class="k">参考乘车日</span><span class="v"><b id="src-ref">—</b>（与出行日班次结构一致）</span></div>
-            <div class="kv"><span class="k">图片</span><span class="v">Wikimedia Commons 或自有素材，许可逐张标注在方案末尾</span></div>
+            <div class="kv"><span class="k">图片</span><span class="v">公开网络实景图，仅用于自用行程参考</span></div>
             <div class="kv"><span class="k">气候与人文</span><span class="v">公开资料 + 本地一手攻略，属定性描述</span></div>
             <div class="kv"><span class="k">评分为主观</span><span class="v">1–5 分，可按 <code>js/data.js</code> 中 <code>clusters</code> 自行修改</span></div>
           </div>
@@ -183,7 +183,7 @@
           <ol style="margin:12px 0 0;padding-left:20px;font-size:13.5px;display:grid;gap:6px">
             <li>打开 <code>js/data.js</code>，先改 <code>meta</code> 与 <code>sampleProfile</code>。</li>
             <li>改 <code>clusters</code>（5 个风格互斥的群）；详细方案在 <code>plans</code>，复制整段即可新增。</li>
-            <li>新增图片放进 <code>images/</code>，文件名即 <code>imgs</code> 里的 id，并在 <code>credits</code> 补署名。</li>
+            <li>新增图片放进 <code>images/</code>，文件名即 <code>imgs</code> 里的 id（不需要署名）。</li>
             <li>整包压缩即可分享；双击 <code>index.html</code> 离线可看，无需服务器。</li>
           </ol>
         </aside>
@@ -197,7 +197,7 @@
   <div class="wrap foot-grid">
     <span><strong>报告口径：</strong>示例数据生成，供决策参考，不构成预订承诺。</span>
     <span><strong>票价查询：</strong><b id="meta-fare-2"></b>　适用出行日：<b data-trip-range></b></span>
-    <span><strong>图片：</strong>Wikimedia Commons，署名见各方案末尾。</span>
+    <span><strong>图片：</strong>公开网络实景图，仅用于自用参考。</span>
   </div>
 </footer>
 

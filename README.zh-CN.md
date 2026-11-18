@@ -82,9 +82,9 @@ flowchart TD
 travel-report/
 ├─ index.html          # 双击就开，不联网（amap 模式除外）
 ├─ css/style.css
-├─ js/data.js          # ★ 只有这个要改：画像 / 群 / 行程 / 票价 / 署名
+├─ js/data.js          # ★ 只有这个要改：画像 / 群 / 行程 / 票价
 ├─ js/app.js           # 渲染逻辑
-├─ images/             # 实景图（每景点 4–6 张，地标 6–10 张）+ 逐张署名
+├─ images/             # 实景图（每景点 4–6 张，地标 6–10 张），不需要署名
 └─ README.md           # 数据来源、假设清单、怎么改
 ```
 
@@ -119,14 +119,14 @@ travel-report/
 | `build_attractions.py` | 抓公开榜单 → 解析 → 去重 → 打标签 → 维基补介绍，生成景点库 |
 | `attractions.py` | 查库：按省/类型/标签/关键词；排除去过、找同类替代；`--all --format compact` 输出整表 |
 | `fetch_rail_fares.py` | 12306 车次 + 各席别实价（自动 cookie、核对实际上车站） |
-| `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重、自动署名 |
-| `fetch_images_search.py` | 多源检索抓图（Commons / Commons 分类 / Openverse / 维基条目首图） |
+| `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重 |
+| `fetch_images_search.py` | 多源检索抓图（Commons / Commons 分类 / Openverse / 维基条目首图）；不做题材判断，由 AI 逐张看图 |
 | `fetch_geo.py` | 按名称查经纬度（维基坐标 + Wikidata 兜底） |
 | `optimize_images.py` | 压图控体积，长边与质量可调 |
-| `verify_report.py` | 静态自检：图片/署名/重复图/外链/占位符/价格结构/季节与预算口径 |
+| `verify_report.py` | 静态自检：图片/重复图/外链/占位符/价格结构/季节与预算口径 |
 | `package_report.py` | 先自检再打 zip，保留顶层目录 |
 | `calc_budget.py` | 与页面同公式的预算复算 |
-| `lib.py` | 公共函数（HTTP 会话、重试、md5、署名清洗） |
+| `lib.py` | 公共函数（HTTP 会话、重试、md5） |
 
 ---
 
@@ -141,8 +141,8 @@ uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 黄山北 2026-11-2
 # 抓图：清单每行 slug|Commons 文件名|宽度
 uv run --no-project scripts/fetch_images.py ../travel-report/images manifest.tsv --sleep 4
 
-# 增量补图（保留已有 credits）
-uv run --no-project scripts/fetch_images_search.py ../travel-report/images more.tsv --keep-credits
+# 增量补图（已有文件保留，编号续写）
+uv run --no-project scripts/fetch_images_search.py ../travel-report/images more.tsv
 
 # 景点库
 uv run --no-project scripts/attractions.py --province 浙江 --type 山岳

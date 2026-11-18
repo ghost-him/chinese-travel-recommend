@@ -1,7 +1,6 @@
 ---
 name: chinese-travel-recommend
 description: 按用户画像、出行时间、假期长度、同行者所在地推荐目的地，并交付可直接打开的图文 HTML 报告（行程、风土人情、交通票价、费用估算、路线地图）。用于「元旦/春节去哪」「帮我规划几天行程」「两个人从不同城市出发在哪会合」「预算 X 元能去哪」这类请求。
-version: 1.8.3
 license: MIT
 triggers:
   - 用户给出日期/假期长度，询问去哪、怎么排、要花多少钱
@@ -15,6 +14,8 @@ tools:
 ---
 
 # 中文旅行推荐（chinese-travel-recommend）
+
+**定位：个人使用的行程报告。** 报告只给用户自己看，不做公开发布、不做分享传播；因此图片可以直接用网络上抓到的图，**不需要署名、不需要按许可筛选**——唯一硬要求是：图必须是这个地点本身的实景。
 
 ## skill 结构
 
@@ -62,7 +63,7 @@ chinese-travel-recommend/
 
 1. **用户报出的每个候选，必须进入地点群集合，且必须拿到一个完整方案**（行程 / 景点 / 交通 / 费用），不能因为分数低就悄悄删掉或只写一行点评。用户提过的地方，报告里没有 = 失职。
 2. 候选与画像冲突（季节、天数、预算）时，**写在方案里的「为什么不推荐」**，而不是不出现。
-   **预算上限不适用于用户点名的候选**：不因为超 ¥ 上限把它删掉或只给一行点评；按出行时段（元旦/春节/暑期溢价）算出真实预计花费，写清「按你的上限会超多少、超在哪」。用户自己决定加预算还是换地方。
+   **预算上限不适用于用户点名的候选**（只豁免预算，季节/天数照判）：不因为超 ¥ 上限把它删掉或只给一行点评；按出行时段（元旦/春节/暑期溢价）算出真实预计花费，写清「按你的上限会超多少、超在哪」。用户自己决定加预算还是换地方。若该地当季不成立或缺天数，仍按第 2、6 步标 `off`/`closed` 或「需 ≥N 天」，并写明「这个月/这个长度为什么不适合」。
 3. 用户说「没有」也要确认一次（「确定没有已经想去的地方？」），再进入硬筛。
 4. 候选数量不设上限；只有当新候选与已有群**风格冲突**时，才替换掉自评最低的同风格群，并说明替换关系。
 
@@ -210,7 +211,8 @@ stateDiagram-v2
 - 单程门到门 ≤ 假期的 30%（4 天行程 ≈ 单程 ≤ 8–9 小时）——在途超过这个比例，落地后只剩赶路与睡觉，方案再漂亮也玩不动
 - 气候与用户偏好冲突的排除（避寒就别推 -20℃）
 - 4 天以内不排「换酒店 ≥ 2 次」的线路——换一次店等于半天耗在退房、拖行李和入住上
-- 预算上限 < 往返交通 × 1.8 的，先砍**模型自选**目的地；**用户点名的候选不砍**，改为算出真实预计花费并标注超支（1.8 是保底线：交通之外还有住宿、餐饮与门票）
+- 预算上限 < 往返交通 × 1.8 的，先砍**模型自选**目的地；**用户点名的候选只豁免预算**，不算「可砍」，改为算出真实预计花费并标注超支（1.8 是保底线：交通之外还有住宿、餐饮与门票）；季节与天数仍照常判定，不符合就写清楚
+- **未点名的候选允许超上限，最多 ¥3,000/人**：好玩的地方常常自带高消费项（滑雪、温泉、索道、出海），或者路费本身很贵但目的地确实值。这类不要因为超预算就砍，而是要**同时给出两套账**——玩这个项目的人均、不玩的人均——让用户自己决定；两套账都要写清「超多少、超在哪一项」。
 - 季节 `closed` / 需要边防证但办不下来的，直接淘汰
 
 ### 4. 多出发地会合成本
@@ -276,7 +278,33 @@ uv run --no-project scripts/attractions.py --missing-intro               # 还�
 
 ### 6. 组群：推荐单位是「地点群」，不是城市
 
-**推荐单位是「地点群」，不是城市；群的数量不固定。** 有几个真正成立的群就推几个（常见 4–7 个），不为凑数硬拼跨省组合，也不为某个固定数字砍掉合格的候选。同风格又挨得近的地方，必须合并成一条线一次玩完。
+**推荐单位是「地点群」，不是城市。群的数量按下式定，且总数至少 5 个：**
+
+```
+群数 ≥ 用户点名的地点数 + max(3, 5 - 用户点名的地点数)
+```
+
+- 用户点名的地方**强制全部进群，但只豁免预算一项**：超上限照实写超多少（见第 3、4 步）。
+  - **季节照判**：非当季写 `off` + 原因（「这个月不适合、换季再来」），闭园写 `closed` 并说明恢复时间；不能因为用户点名就说「也能去」。
+  - **天数照判**：群需要的天数超出假期时，照常列出但标「需 ≥N 天」，并排除出首选；不能把 10 天的内容塞进 6 天行程。
+- 除点名的以外，**至少再补 3 个**用户没提到的地方；只点了 1 个，就补 4 个，凑满 5 个。
+- 补进来的候选要风格互斥、季节成立；同为看海的城市合并成一条线，不拆成多个候选。
+- 确实找不到足够的群时，把缺口和原因写进报告，不要用同质城市或跑不通的组合凑数。
+
+页面上**不要写「XX群」**：标题写成「地点 · 一句让人想去的话」，下面一行小字放取舍（模板的 `name` 与 `tagline` 就是这个分工）。「群」只是内部工作单位，不是给用户看的名字。
+
+#### 单城深度：先问「这个城市你打算玩几天」
+
+有些城市本身就能撑起 5–6 天（北京、西安、成都、杭州这类），底蕴厚、景点密度高，硬拼邻城反而两头都浅。遇到这种城市：
+
+1. **先说明它值得几天、为什么**——列出 3–5 个能撑住天数的具体理由（世遗/博物馆/街区/演出/近郊），给出「3 天够看主干 / 5 天能补博物馆和近郊」这种区间判断；
+2. **再问用户打算在这座城玩几天**，以及愿不愿意为它放弃跨城；
+3. 用户答 4 天以上 → 出**单城深度群**：行程按片区（东城/西城/近郊）排，不排跨城，住宿不换；
+4. 用户只想停 2–3 天 → 仍然按跨城群处理，把它当主城 + 一个 ≤2 小时的副城。
+
+问的时机：候选清单确认后、**抓图之前**——单城深度和跨城群的图片清单完全不同（前者要街区、市场、博物馆细节，后者要城市地标），先问能省一轮返工。
+
+用户嫌少、要求「再多几个」时：补的是**风格互斥、季节成立的新区域**（例：已有冰雪/雪山古城/热带/温泉边城，就补一个世遗海港），不是把同风格城市拆成多个候选；每个新增群同样要有完整方案，加不出来就直说「目前只有 N 个真正成立」，不要用同质城市充数。
 用户在第 0 问里提过的候选必须并进来，**每个群都要出一份完整方案**，不是一个首选 + 一堆点评。
 
 1. **同风格去重**：只看海、只看古镇、只看雪山的目的地只能出现一次，多个合成一个群。
@@ -423,7 +451,7 @@ uv run --no-project scripts/attractions.py --missing-intro               # 还�
 | 项 | 要求 |
 |---|---|
 | 介绍 | 60–150 字，回答「是什么 / 为什么值得 / 看什么」，并**与上文风土人情呼应**（点出具体的历史、宗教、工艺或民俗，而不是「风景优美、值得一去」） |
-| 图片 | **每景点 4–6 张，地标/世遗/5A 6–10 张，不设上限**（外观、内部、细节、不同时段、人流状态各来一张）。少于 4 张视为不合格；卡片图廊是网格，能排任意张数，不要因为「模板只放 3 张」就少抓 |
+| 图片 | **每景点目标 4–6 张，地标/世遗/5A 目标 6–10 张，不设上限**（外观、内部、细节、不同时段、人流状态各来一张）。**图片不足 4 张照样出卡片**：那是「搜不到更多」而不是「不想搜」，删卡会让用户以为这里不值得去；**小众点位一张都搜不到也出卡**——`imgs` 留空数组并加 `noImageNote`（如「该点位公开来源暂无实景图」），页面自动显示占位说明，绝不用异地/异主题照片顶替 |
 | 门票 | 价格 + 「以公告为准」；免费也要写明 |
 | 建议时长 | 区间，如 2–2.5 h |
 | 开放时间 | 有停止入场时间的要写：最后售票、停止入园、清场、周几闭馆 |
@@ -478,17 +506,17 @@ cp -r <skill-dir>/assets/report-template ./travel-report
 travel-report/
   index.html          # 结构已定，通常不改
   css/style.css       # 视觉系统，改配色再动
-  js/data.js          # ★ 只改这个：画像 / 每个群一份完整方案 / 行程 / 票价 / 署名
+  js/data.js          # ★ 只改这个：画像 / 每个群一份完整方案 / 行程 / 票价
   js/app.js           # 渲染逻辑，通常不改（加地图时改这一段）
   images/             # 删掉占位图，放真实图片（4–6/景点，地标 6–10，不设上限）
-  README.md           # 改法、来源、许可
+  README.md           # 改法、字段说明
 ```
 
 **开箱三步**
 
 1. `cp -r` 模板到输出目录；
 2. 改 `js/data.js`：`meta.isTemplate`、`title`、`chips`、`clusters`、`plans` 换成真数据；
-3. `uv run --no-project scripts/fetch_images.py <report-dir>/images manifest.tsv --sleep 4` 抓图进 `images/`、补 `credits`，再删掉 `placeholder-*.svg`。
+3. `uv run --no-project scripts/fetch_images.py <report-dir>/images manifest.tsv --sleep 4` 抓图进 `images/`，再删掉 `placeholder-*.svg`。
 
 模板自带两个保护：`meta.isTemplate: true` 时页面顶部挂红色横幅，`verify_report.py` 也会警告。
 **改完数据务必置为 `false`**，否则等于对外发布占位内容。
@@ -499,7 +527,7 @@ travel-report/
 - 每个方案带一张**路线地图**（离线可开，见第 14 步）；
 - `file://` 直接可开（不用 ES module、不用 fetch 读本地 JSON）；
 - 图片本地化，`<img>` 必须写 `alt`，`loading="lazy"`；
-- 图片署名逐张可见，附源页面链接；
+- **图片不需要署名**（个人自用，`data.js` 里没有 `credits` 字段）；唯一硬要求：**每张图必须是该地点本身**——抓完由 AI 逐张看图确认，错图删掉重抓，代码不做题材判断；
 - 费用表区分「实查/估算」，并提供人均与总额；
 - 移动端 390px 无横向溢出（表格放滚动容器，网格子项 `min-width:0`）。
 
@@ -543,18 +571,18 @@ travel-report/
 
 ### 15. 验证清单（交付前逐条过）
 
-> 脚本能判的（文件缺失、坏链、署名、重复图、价格结构、占位符）以 `verify_report.py` 输出为准，不要人工再数一遍；人只判脚本判不了的：内容是否呼应、来源是否可信、行程是否可执行。
+> 脚本能判的（文件缺失、坏链、重复图、价格结构、占位符）以 `verify_report.py` 输出为准，不要人工再数一遍；人只判脚本判不了的：**图是不是这个地点**、内容是否呼应、来源是否可信、行程是否可执行。
 
-1. `uv run --no-project scripts/verify_report.py <report-dir>` 全绿（文件、图片、署名、重复图、外链、占位符）；
+1. `uv run --no-project scripts/verify_report.py <report-dir>` 全绿（文件、图片、重复图、外链、占位符）；
 2. 打开页面，控制台 0 报错；
 3. 所有有 `src` 的 `<img>` 的 `naturalWidth > 0`（无 404）；
 4. 切换每个方案 tab，景点数/费用总额随之变化；
 5. 改人数/房价，总额按公式重算，且与 `calc_budget.py` 结果一致；
 6. 390px 下 `document.documentElement.scrollWidth === innerWidth`；
 7. 每个价格旁边能看到查询时间与「实查/估算」标记；
-8. 每个景点都有 60 字以上介绍，且与风土人情呼应；有 `status`（open/off-season/closed/limited）与 `entry`（哪个门进）；非当季/闭园在页面显著报警，不能只藏在提示里；**图片 4–6 张（地标 6–10 张）**，`verify_report.py` 对少于 4 张出警告；
+8. 每个景点都有 60 字以上介绍，且与风土人情呼应；有 `status`（open/off-season/closed/limited）与 `entry`（哪个门进）；非当季/闭园在页面显著报警，不能只藏在提示里；**图片目标 4–6 张，地标/世遗/5A 6–10 张**；凑不到照样出卡、按实际张数展示，小众点位 0 张也可（`imgs: []` + `noImageNote`，页面显示占位说明）；
 9. 风土人情与景点提示都有本地一手来源；关键结论 ≥2 个独立来源，门票/时间以官方公告为准；
-10. 所有推荐群风格不重复，且**同一群内城市同省或相邻省、任一段 ≤2 小时**；邻近同质城市已合并成群，每段群内交通有时长与票价；
+10. **群数 ≥ 用户点名数 + max(3, 5 − 点名数)，总数 ≥5**（少于 5 个直接不合格）；风格不重复，且**同一群内城市同省或相邻省、任一段 ≤2 小时**；邻近同质城市已合并成群，每段群内交通有时长与票价；页面上群名写成「地点 · 一句吸引人的话」，不出现「XX群」；
 11. 车次发车站与真实站点一致（用 `fetch_rail_fares.py` 复核，别凭记忆）；
 12. **每个推荐的群都有一份完整方案 tab**，切换后行程 / 景点 / 交通 / 费用齐全（不是只有首选有详情）；
 13. 每个方案有一张路线地图：SVG 模式点位坐标齐全、与实际地理位置一致、密集点位有避让；amap 模式有 key 且标注需联网；页面内没有 `http(s)` 图片引用；
@@ -562,7 +590,7 @@ travel-report/
 15. 群清单在深挖前给用户过目过；用户说去过/不想去的地方已整群替换，报告里有「已替你排除」表（或明确标注「未确认是否去过」）；
 16. 每个候选群都过了季节门槛：有 `seasonStatus`，非当季有 `seasonNote`，`closed` 的没进方案；
 17. 预算口径已记录（`shared` / `per_person` / `uniform`）；各自上限时逐人写「超/余多少」，没有用平均值掩盖；
-18. 用户点名的候选即使超预算也在列表里、有完整方案，并写清超出金额与原因；
+18. 用户点名的候选即使超预算也在列表里、有完整方案，并写清超出金额与原因；**点名只豁免预算**——季节不成立要标 `off`/`closed` 并写原因，天数不够要标「需 ≥N 天」并排除出首选；
 19. 给用户确认名单前，有子 agent 预审结果（季节/闭园/交通/证件）；交付前有第二次整体审核记录；
 20. 地图模式已问过用户；SVG 模式离线可开，amap 模式有 key 并标注需联网；**选了 amap 却没给 key 时判不合格——必须回问 key，或拿到用户明确同意后才降级为 SVG**。
 21. 候选景点来源：**先查 `assets/attractions/attractions.jsonl`**（`attractions.py --name`），库里没有才联网补；用户说去过的地方用 `--exclude` 排除、`--similar` 找替代，并在报告「已替你排除」里写清。
@@ -576,7 +604,7 @@ travel-report/
    ```bash
    uv run --no-project scripts/package_report.py <report-dir> <out.zip>
    ```
-   打包脚本会先自检，并把 `.meta-*`、`credits.jsonl`、`manifest.json` 等中间文件排除。
+   打包脚本会先自检，并把 `.meta-*`、`.seen-md5`、`manifest.json` 等中间文件排除。
 5. 交付时同时给：zip 路径、目录路径、`index.html` 双击打开说明、哪些价格是实查/估算、地图是否需要联网。
 
 ## 工具链（脚本是唯一事实源）
@@ -588,29 +616,54 @@ travel-report/
 | `build_attractions.py` | 抓取公开榜单 → 解析 → 去重 → 打标签 → 维基补介绍，生成景点库 JSONL | `uv run --no-project scripts/build_attractions.py --enrich` |
 | `attractions.py` | 查景点库：按省/类型/标签/关键词筛选，排除去过的地方，找同类替代；`--all --format compact` 输出整表快照（约 11k 字符） | `uv run --no-project scripts/attractions.py --similar 泸沽湖` |
 | `fetch_rail_fares.py` | 12306 车次 + 各席别实价；自动带 cookie、核对实际发车站；空结果时提示「可能未开售」 | `uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 泉州南 2026-11-25 O` |
-| `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重、生成可直接粘贴的 credits；`--keep-credits` 增量补图 | `uv run --no-project scripts/fetch_images.py images manifest.tsv --sleep 4` |
-| `fetch_images_search.py` | **多源检索抓图**（Commons 搜索 / Commons 分类 / Openverse / 维基条目首图），各自限速 + 熔断 + md5 去重 + 署名；清单格式 `<slug>\|<检索词>\|<张数>` | `uv run --no-project scripts/fetch_images_search.py images manifest.tsv --sleep 4` |
-| `verify_report.py` | 报告包静态自检（图片/署名/重复/外链/占位符/价格结构/季节与预算口径） | `uv run --no-project scripts/verify_report.py travel-report` |
+| `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重、尺寸校验 | `uv run --no-project scripts/fetch_images.py images manifest.tsv --sleep 4` |
+| `fetch_images_search.py` | **多源检索抓图**（Commons 搜索 / Commons 分类 / 维基首图 / Openverse / 百度图片），各自限速 + 熔断 + md5 去重；不做题材判断 | `uv run --no-project scripts/fetch_images_search.py images manifest.tsv` |
+| `verify_report.py` | 报告包静态自检（图片/重复/外链/占位符/价格结构/季节与预算口径） | `uv run --no-project scripts/verify_report.py travel-report` |
 | `package_report.py` | 先自检再打 zip，保留顶层目录，排除中间文件 | `uv run --no-project scripts/package_report.py travel-report out.zip` |
 | `optimize_images.py` | 把图片压到可分享体积（长边 ≤1400、JPEG q82）；实测 74.4 MB → 20.6 MB | `uv run --no-project scripts/optimize_images.py travel-report/images` |
 | `fetch_geo.py` | 按名称查经纬度（维基 `prop=coordinates` + Wikidata P625 兜底），输出可粘进 `data.js` 的坐标 | `uv run --no-project scripts/fetch_geo.py geo.tsv --out geo.json` |
 | `calc_budget.py` | 与页面同公式的预算复算 | `uv run --no-project scripts/calc_budget.py --rail-a 1500 --rail-b 925 --stay 350 --nights 5 --rooms 1 --food 120 --days 6 --local 30 --tickets 150 --exp 100 --buffer 10 --people 2` |
-| `lib.py` | 公共函数（UA、cookie、重试、md5、署名清洗） | 由其他脚本 import |
+| `lib.py` | 公共函数（UA、cookie、重试、md5） | 由其他脚本 import |
 
-### 图片从哪来（2026-11-18 实测，按可用性排序）
+### 图片从哪来
 
-`fetch_images_search.py` 内置四个免 key 图源，用 `--sources` 选择，默认全开：
+`fetch_images_search.py` 内置五个图源，**默认全开**，一次任务里并发去查，谁有图就用谁的：
 
 | 源 | 免 key | 限速 | 擅长 | 备注 |
 |---|---|---|---|---|
 | `commons`（关键词搜索） | ✅ | 3.5 s | 地名 + 英文专名，命中率最高 | 同义词多试两次，别一次就放弃 |
 | `commonscat`（`Category:<词>`） | ✅ | 3.5 s（与 commons 共用） | 地标、世遗有现成分类，一次能出十几张 | 分类名要用英文/专名，`Category:Gulangyu` 比中文更稳 |
-| `wikipedia`（条目首图） | ✅ | 1.5 s | 冷门景点也有首图，构图通常最好 | 首图的作者/许可必须回查 Commons `extmetadata`，脚本已做 |
+| `wikipedia`（条目首图） | ✅ | 1.5 s | 冷门景点也有首图，构图通常最好 | 首图可能是同名他地，必须看图确认 |
 | `openverse`（聚合 Flickr/博物馆） | ✅ | 1.2 s | 风格多样，补充非 Commons 视角 | 偶发返回 0 条或长时间挂起，已加 25 s 超时 + 熔断 |
+| `web`（百度图片检索 → CDN 图） | ✅ | 1.5 s | 雾凇、雪场、夜市、民俗园这类 Commons 没有的实景 | 同一地名常有别处配图，必须看图确认 |
 
-实测**不可用**（不要再试）：Library of Congress（Cloudflare 403）、The Met（API 2026-10 下线）、Art Institute of Chicago（Cloudflare 403）、Pexels / Pixabay / Unsplash（需 key，且要注明来源用户名）。国内图库（马蜂窝/携程/小红书）没有可用授权 API，抓到也**不能**直接用在 CC 报告里。
+实测**不可用**（不要再试）：Library of Congress（Cloudflare 403）、The Met（API 2026-10 下线）、Art Institute of Chicago（Cloudflare 403）、Pexels / Pixabay / Unsplash（需 key）。必应图片的 `images/async` 接口会按 cookie 风控返回空 body，不要再用。
 
-选源建议：先 `commons,commonscat` 打底（署名最干净），数量不够再加 `wikipedia`，需要不同风格再加 `openverse`。单源卡住时，用 `--sources commons --workers 5 --sleep 2.5` 反而更快。
+```bash
+# 默认：五个源全开，缺图会自动用 web 源补
+uv run --no-project scripts/fetch_images_search.py travel-report/images manifest.tsv
+
+# 只要 Commons 系（速度快，把控感强）
+uv run --no-project scripts/fetch_images_search.py travel-report/images manifest.tsv --sources commons,commonscat
+
+# 冷门景点直接从网络补
+uv run --no-project scripts/fetch_images_search.py travel-report/images manifest.tsv --sources web
+```
+
+规则：
+
+1. **不需要署名**：图从哪来不重要，写不写作者也不重要（个人自用）；脚本只存文件，不生成 `credits`。
+2. **抓完必须由 AI 逐张看图核对**（脚本不做题材判断），两道关都过才保留：
+   - **是不是这个地点**：画面里必须是**该地点本身的实景**（同一座峰/同一段城墙/同一片湖岸），不是同名他地、绘画、卫星图、模型图、cosplay 或邻近城市；
+   - **质量够不够用**：糊到看不清结构（长边 <800 px 或明显涂抹/压缩块）、**画面有大片 logo / 水印 / 台标 / 字幕条**、截图里带浏览器或 App UI、季节或建筑与描述明显不符（如写「雪季」却是夏日绿坡）——这些一律**换图重抓**，不要凑数。
+   - 用 `read` 直接打开 `images/` 里的图（可一次读多张），或先 `optimize_images.py` 出小图再看；
+   - 错图/废图当场删掉，换检索词/换图源重抓，并在 `manifest.tsv` 里换更具体的词（加「雪景」「夜景」「航拍」等限定）；
+   - Commons 关键词检索最容易混进同名地点（Niagara Falls、Horyu-ji、Rosa Parks 都是实测踩过的），**没有例外，全部要看**。
+3. **凑不够 4 张也要出卡**：先扩检索词、换源再试一轮；仍然只有 1–3 张就照样放进 `pois`，在页面按实际张数展示——「搜不到」不等于「不值得去」。
+   **一张都没有**的小众点位同样出卡：`imgs: []` + `noImageNote: "该点位公开来源暂无实景图"`，模板会渲染占位块；不要用邻近景点、别处照片或卫星图充数。
+4. **地标/世遗/5A 按 6–10 张抓**：这类点位公开图多，6 张起才够看清外观、内部、细节与不同时段；只抓到 4 张说明检索词或图源没选对，换 `commonscat` / 加 `web` 再试。
+
+选源建议：先用默认（含 web）跑一轮，缺哪几个再单独补；单源卡住时，`--sources commons --workers 5 --sleep 2.5` 反而更快。
 
 ### 已固化的坑（2026-11-18 实测，下次直接照做）
 
@@ -621,8 +674,9 @@ travel-report/
 | 图片全写到 `C:\c\Users\...` | Windows 的 Python 把 POSIX 路径 `/c/...` 当成当前盘下的 `\c\...` | 一律用相对路径（`../travel-report/images`）或 `C:/Users/...`，不要用 `/c/...` |
 | `uv run --no-project -c "…"` 报 unexpected argument | `uv run` 不接受 `-c` | 写 `uv run --no-project python -c "…"` |
 | 补图把已抓的 `slug-1.jpg` 覆盖掉 | 编号固定从 1 开始 | `fetch_images_search.py` 从「已有最大编号 +1」续写 |
+| 检索词抓回尼亚加拉油画、法隆寺、亚特兰大教堂、九寨沟、印度象——画面与目的地完全无关 | Commons 关键词检索只按文本相似度排序，不判断题材 | **抓完由 AI 逐张看图删错图**（代码不做题材校验）；删掉的用更具体的检索词或 `commonscat` 重抓 |
 | 抓图任务跑十几分钟只出几张、像是卡死 | Openverse 请求会长时间挂起，长超时 × 重试把线程占满 | 超时压到 25s、重试 1 次；同一源连续 4 次异常即熔断，本批放弃该源 |
-| 凑不到 4 张「同主题」实图 | 冷门景点在 Commons/Openverse 上没有足够照片 | 先扩大检索词/换源再试一轮；仍不足 4 张就**删掉该景点卡片**（`pois` 里不写），在 `days` 行程文字里保留；绝不用异地/异主题照片冒充 |
+| 凑不到 4 张「同主题」实图 | 冷门景点在 Commons/Openverse/百度上都没有足够照片 | 先扩大检索词/换源再试一轮；仍不足 4 张**照样出卡片**（按实际张数展示，图廊是网格），只有题材不符才删卡；绝不用异地/异主题照片冒充 |
 | 高德地图控制台报 `file://webapi.amap.com/theme/.../mark_bs.png` 404 | 高德默认 marker 图标是协议相对 URL，`file://` 下被解析成本地路径 | 城市标记必须传自定义 `content`（模板 `app.js` 已改），只用 `AMap.Marker({content})`，不要用默认图标 |
 | 用 headless WebKit 验在线地图/HTTPS 一律失败（`TLS support is not available`） | omp 自带 WebKit 无 TLS | 在线地图与最终渲染验证一律用真 Chrome：`browser.open({app: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"})` |
 | 方案 tab 点不动、总额不变 | 按 `dataset.plan` 匹配，但模板 tab 只有 `<span class="tab-name">` | 用 `.tab-name` 文本匹配后 `click()`；验证时必须逐 tab 读 `.row-total` |
@@ -630,7 +684,7 @@ travel-report/
 **三条纪律**
 
 1. **手工查过的东西必须回到脚本**：站点字段索引、`seat_types`、缺 cookie 返回空、Commons 限流的假图片——都已写进 Python 脚本。下次同类问题不会再错。
-2. **修过的问题必须变成检查项**：图片只有 60 字节、`--keep-credits` 追加时 JSON 逗号、Windows 下 `/tmp` 不存在、`file://` 外链——都固化到脚本或验证清单。
+2. **修过的问题必须变成检查项**：图片只有 60 字节、Commons 限流返回 HTML、Windows 下 `/tmp` 不存在、`file://` 外链——都固化到脚本或验证清单。
 3. **依赖用 PEP 723 写在脚本头部**：`requests` 负责 HTTP/重试，`json5` 解析 `data.js`，`Pillow` 校验图片是否可解码。uv 会按脚本元数据自动装依赖，不污染全局环境；不要手动 `pip install`。
 
 脚本依赖：`uv`（会自动选择本机 Python 3.11+）。不再需要 curl / jq / node / Git Bash；Windows 的 `cmd` 或 PowerShell 也能直接调 `uv`。
@@ -675,7 +729,9 @@ travel-report/
 - ❌ 用 Leaflet / OSM 在线瓦片做「离线」地图，`file://` 双击打开一片空白
 - ❌ 介绍写「风景优美、值得一去」，与前面的风土人情毫无关系
 - ❌ 行程排满 4 个景点还声称「轻松」
-- ❌ 图片直接热链外站，或用了 CC BY-SA 却不署名
+- ❌ 图片直接热链外站（`file://` 下打不开）
+- ❌ 图不是那个地方就放上去——同名景点、绘画、卫星图、邻近城市都不行
+- ❌ 抓完不看图，直接把脚本返回的所有图片塞进报告
 - ❌ 交付一个需要 `npm install` 才能看的报告
 
 ## 输出格式

@@ -7,7 +7,7 @@
 
 用法：uv run --no-project scripts/verify_report.py <report-dir>
 
-检查：文件完整 / 数据可加载 / 每景点 ≥2 图 / 图片存在且已署名 / 无孤儿图 /
+检查：文件完整 / 数据可加载 / 图片存在 / 无孤儿图 /
       无重复图 / 无外链资源 / 无占位符 / 车次价格结构 / 季节与预算口径。
 退出码：0 全过（可有 warning），1 有 error。
 """
@@ -102,7 +102,7 @@ def main() -> int:
             warn("没有 clusters：仍是按城市推荐，未按「地点群」组群")
         else:
             if len(clusters) < 5:
-                warn(f"只有 {len(clusters)} 个地点群（常见 4–7 个）")
+                err(f"只有 {len(clusters)} 个地点群（要求 ≥5，少于 5 个直接不合格）")
             styles: set[str] = set()
             cities: set[str] = set()
             for cluster in clusters:
@@ -176,10 +176,10 @@ def main() -> int:
             for poi in plan.get("pois") or []:
                 poi_count += 1
                 imgs = poi.get("imgs") or []
-                if len(imgs) < 2:
-                    err(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 4–6 张）")
+                if not imgs:
+                    warn(f"[{key}] 景点「{poi.get('name')}」没有实景图：页面会显示占位说明（小众点位搜不到图属正常）")
                 elif len(imgs) < 4:
-                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 4–6 张，地标 6–10 张）")
+                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 4–6 张；搜不到也照常展示）")
                 if not poi.get("intro") or len(poi["intro"]) < 30:
                     err(f"[{key}] 景点「{poi.get('name')}」缺介绍或过短")
                 if not poi.get("ticket") or not poi.get("dur"):
@@ -187,6 +187,12 @@ def main() -> int:
                 if not poi.get("tip"):
                     warn(f"[{key}] 景点「{poi.get('name')}」没有提示")
                 referenced.update(imgs)
+            for day in plan.get("days") or []:
+                items = day.get("items") or []
+                if len(items) > 3:
+                    err(f"[{key}] 第 {day.get('n')} 天有 {len(items)} 个时间块（上限 3）")
+                if day.get("n") == 1 and sum(1 for i in items if i.get("kind") == "sight") > 1:
+                    warn(f"[{key}] 抵达日排了多个游览项：抵达日只留 1 个轻项目")
             for leg in ("out", "back"):
                 for row in (plan.get("transport") or {}).get(leg) or []:
                     if not (row.get("price", 0) > 0):
@@ -205,15 +211,9 @@ def main() -> int:
                     warn(f"[{key}] sources 只有 {len(sources)} 条（建议 ≥3，覆盖预约/票价/限流）")
         ok(f"共 {poi_count} 个景点，引用 {len(referenced)} 张图")
 
-        credits = trip.get("credits") or {}
         for image_id in referenced:
             if stem(image_id) not in by_stem:
                 err(f"引用了不存在的图片：images/{image_id}")
-            credit = credits.get(image_id)
-            if not credit:
-                err(f"图片未署名：{image_id}")
-            elif not all(credit.get(field) for field in ("author", "license", "file")):
-                err(f"署名不完整：{image_id}")
 
         ref_stems = {stem(image_id) for image_id in referenced}
         orphans = [name for name in files if stem(name) not in ref_stems]
@@ -235,6 +235,23 @@ def main() -> int:
     # 6. 外链资源（CSS 外链会直接导致离线打开失败）
     html = (directory / "index.html").read_text(encoding="utf-8") if (directory / "index.html").is_file() else ""
     css = (directory / "css/style.css").read_text(encoding="utf-8") if (directory / "css/style.css").is_file() else ""
+    if trip:
+        meta = trip.get("meta") or {}
+        title_tag = re.search(r"<title>\s*(.*?)\s*</title>", html, re.S)
+        if title_tag and meta.get("title") and meta["title"] not in title_tag.group(1):
+            err(f"index.html <title> 与 meta.title 不一致：「{title_tag.group(1)}」")
+        hero = re.search(r'id="hero-title"[^>]*>\s*(.*?)\s*<', html, re.S)
+        if hero and meta.get("title") and meta["title"] not in hero.group(1):
+            err(f"index.html 首屏标题与 meta.title 不一致：「{hero.group(1)}」")
+        if meta.get("tripDays"):
+            head = " ".join(filter(None, [
+                title_tag.group(1) if title_tag else "",
+                hero.group(1) if hero else "",
+                (re.search(r'<meta name="description" content="([^"]*)"', html) or [None, ""])[1],
+            ]))
+            bad = sorted({n for n in re.findall(r"(\d+)\s*天", head) if abs(int(n) - meta["tripDays"]) >= 2})
+            if bad:
+                warn(f"标题/描述里出现与 tripDays={meta['tripDays']} 不符的天数：{', '.join(bad)} 天")
     external = re.findall(r"(?:src|href)\s*=\s*[\"'](https?://[^\"']+)[\"']", html)
     css_external = re.findall(r"url\(\s*[\"']?(https?://[^)\"']+)", css)
     if external:

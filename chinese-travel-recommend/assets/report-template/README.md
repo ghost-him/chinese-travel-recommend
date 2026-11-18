@@ -45,11 +45,11 @@ uv run --no-project scripts/package_report.py ./travel-report
 | `plans[].pois[].entry` | 每个景点必填：从哪个门进、哪个口近地铁/停车场 |
 | `plans[].sources` | **必填**：`[{claim, source, date}]`，3–4 条覆盖关键结论（开放时间/预约/票价/限流）；为空则页面「本方案情报来源」整段不渲染 |
 | `clusters[].seasonStatus / seasonNote` | 群级季节状态；`off`/`closed` 会在方案顶部出 alert |
-| `credits{}` | 每张图片的作者、许可、文件名 |
 
 ## 图片
 
-- 每个景点 4–6 张图、地标/世遗 6–10 张，**不设上限**；少于 4 张 `verify_report.py` 会警告。
+- 每个景点目标 4–6 张图、地标/世遗/5A 6–10 张，不设上限；**不足 4 张照样展示**，小众点位 0 张也可（`imgs: []` + `noImageNote`，页面显示占位块）。
+- 不需要署名：没有 `credits` 字段，图片直接用。
 - 文件名就是 `imgs` 里的 id；带扩展名（如 `kaiyuan-1.svg`）时按原样使用，不带则默认 `.jpg`。
 - 模板里的 `placeholder-*.svg` 只用于占位，替换真实图片后删除。
 
@@ -62,8 +62,8 @@ uv run --no-project scripts/package_report.py ./travel-report
 
 ## 自检会拦住什么
 
-- 景点少于 2 张图、缺介绍、缺门票/时长
-- 图片文件不存在、未署名、重复图
+- 景点缺介绍、缺门票/时长
+- 图片文件不存在、重复图
 - 群风格重复、同一城市出现在两个群；群没有对应方案；方案对不上群
 - 每个群缺 `seasonStatus`；`off` 没写原因；`closed` 群还留着方案
 - 每个景点缺 `status` 或 `entry`；`off-season`/`closed` 缺 `statusNote`

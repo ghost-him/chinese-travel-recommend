@@ -3,17 +3,17 @@
 # requires-python = ">=3.11"
 # dependencies = ["requests>=2.32", "pillow>=10"]
 # ///
-"""从 Wikimedia Commons 批量抓图，带署名、许可、去重、重试。
+"""从 Wikimedia Commons 按文件名批量抓图（去重、重试、尺寸校验）。
 
 用法：
-  uv run --no-project scripts/fetch_images.py <输出目录> <清单.tsv> [--sleep 6] [--keep-credits]
+  uv run --no-project scripts/fetch_images.py <输出目录> <清单.tsv> [--sleep 6]
 
 清单每行（| 分隔，可带 # 注释）：
   kaiyuan-1|Kaiyuan Temple, Quanzhou 16.jpg
   kaiyuan-2|File:The courtyard of Quanzhou Kaiyuan Temple 20170727.jpg
   第三个字段可选：宽度（默认 1200）
 
-产物：<slug>.jpg、credits.jsonl、credits.snippet.js、manifest.json
+产物：<slug>.jpg、manifest.json（`.seen-md5` 记录去重哈希）
 """
 
 from __future__ import annotations
@@ -28,30 +28,29 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from lib import UA_BROWSER, Client, clean_author, info, md5_of
+from lib import UA_BROWSER, Client, info, md5_of
 
 API = "https://commons.wikimedia.org/w/api.php"
 
 
-def fetch_meta(client: Client, title: str, width: int) -> dict | None:
+def fetch_url(client: Client, title: str, width: int) -> str | None:
     try:
         payload = client.get_json(API, {
             "action": "query",
             "titles": f"File:{title}",
             "prop": "imageinfo",
-            "iiprop": "url|extmetadata",
+            "iiprop": "url",
             "iiurlwidth": str(width),
             "format": "json",
         })
     except Exception:
         return None
-    pages = (payload.get("query") or {}).get("pages") or {}
-    for page in pages.values():
+    for page in ((payload.get("query") or {}).get("pages") or {}).values():
         if page.get("missing"):
             return None
         imageinfo = (page.get("imageinfo") or [None])[0]
         if imageinfo:
-            return imageinfo
+            return imageinfo.get("thumburl") or imageinfo.get("url")
     return None
 
 
@@ -61,7 +60,6 @@ def main() -> int:
     parser.add_argument("manifest")
     parser.add_argument("--sleep", type=float, default=6.0)
     parser.add_argument("--width", type=int, default=1200)
-    parser.add_argument("--keep-credits", action="store_true", help="增量模式：保留已有署名")
     args = parser.parse_args()
 
     out = Path(args.out_dir)
@@ -70,19 +68,6 @@ def main() -> int:
         info(f"清单不存在: {manifest}")
         return 1
     out.mkdir(parents=True, exist_ok=True)
-
-    credits_jsonl = out / "credits.jsonl"
-    snippet = out / "credits.snippet.js"
-    if args.keep_credits and credits_jsonl.is_file() and snippet.is_file() and credits_jsonl.stat().st_size:
-        lines = snippet.read_text(encoding="utf-8").splitlines()
-        if lines and lines[-1].strip() == "}":
-            lines.pop()
-        if lines:
-            lines[-1] = re.sub(r"\}\s*$", "},", lines[-1])
-        snippet.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    else:
-        credits_jsonl.write_text("", encoding="utf-8")
-        snippet.write_text("{\n", encoding="utf-8")
 
     seen_file = out / ".seen-md5"
     seen: dict[str, str] = {}
@@ -110,19 +95,14 @@ def main() -> int:
             info(f"跳过：{raw}")
             continue
         total += 1
-        imageinfo = fetch_meta(client, title, width)
-        if not imageinfo:
+        url = fetch_url(client, title, width)
+        if not url:
             info(f"失败 {slug}：API 取不到（429 限流、文件名不对，或文件不存在）")
             failures.append(slug)
             failed += 1
             time.sleep(args.sleep)
             continue
 
-        url = imageinfo.get("thumburl") or imageinfo.get("url")
-        ext = imageinfo.get("extmetadata") or {}
-        author = clean_author((ext.get("Artist") or {}).get("value", ""))
-        license_name = ((ext.get("LicenseShortName") or {}).get("value") or "Unknown").strip()
-        target = out / f"{slug}.jpg"
         try:
             blob = media.get(url, headers={"Referer": "https://commons.wikimedia.org/"})
         except Exception:
@@ -160,30 +140,9 @@ def main() -> int:
             seen[digest] = slug
             with seen_file.open("a", encoding="utf-8") as handle:
                 handle.write(f"{digest} {slug}\n")
-            record = {
-                "slug": slug,
-                "file": str(target),
-                "bytes": len(blob),
-                "author": author,
-                "license": license_name,
-                "source": f"https://commons.wikimedia.org/wiki/File:{title}",
-            }
-            with credits_jsonl.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-            with snippet.open("a", encoding="utf-8") as handle:
-                handle.write(
-                    f'  "{slug}": {{ author: "{author}", license: "{license_name}", '
-                    f'file: "{title}" }},\n'
-                )
-            print(f"  {slug:<22} {len(blob):>8} B  {license_name:<14} {author}")
+            print(f"  {slug:<22} {len(blob):>8} B  {pixel_width}×{pixel_height}")
             ok += 1
         time.sleep(args.sleep)
-
-    lines = snippet.read_text(encoding="utf-8").splitlines()
-    if len(lines) > 1:
-        lines[-1] = re.sub(r",\s*$", "", lines[-1])
-    lines.append("}")
-    snippet.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     summary = {
         "total": total,

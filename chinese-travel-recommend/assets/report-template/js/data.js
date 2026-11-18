@@ -122,15 +122,7 @@ window.TRIP = {
     }
   ],
 
-  /* ---------------- 4. 图片署名（每张都要有） ---------------- */
-  credits: {
-    "placeholder-1.svg": { author: "模板占位", license: "CC0", file: "placeholder-1.svg" },
-    "placeholder-2.svg": { author: "模板占位", license: "CC0", file: "placeholder-2.svg" },
-    "placeholder-3.svg": { author: "模板占位", license: "CC0", file: "placeholder-3.svg" },
-    "placeholder-4.svg": { author: "模板占位", license: "CC0", file: "placeholder-4.svg" }
-  },
-
-  /* ---------------- 5. 详细方案（复制整段即可新增） ---------------- */
+  /* ---------------- 4. 详细方案（复制整段即可新增） ---------------- */
   plans: {
     demo: {
       id: "demo",

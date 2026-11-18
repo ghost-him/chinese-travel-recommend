@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["requests>=2.32"]
 # ///
-"""chinese-travel-recommend 脚本共用工具：HTTP、重试、哈希、署名清洗。
+"""chinese-travel-recommend 脚本共用工具：HTTP、重试、哈希。
 
 依赖由 uv 按本文件的 PEP 723 元数据自动安装；不要手动 pip install。
 """
@@ -10,8 +10,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
-import re
 import sys
 
 UA_DEFAULT = "TravelRecommendSkill/1.4 (local; contact: you@example.com)"
@@ -103,13 +101,6 @@ def sha256_of(path: str) -> str:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def clean_author(value: str) -> str:
-    text = re.sub(r"<[^>]*>", "", value or "")
-    text = html.unescape(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return re.sub(r"^User:", "", text).strip() or "Unknown"
 
 
 def js_escape(value: str) -> str:

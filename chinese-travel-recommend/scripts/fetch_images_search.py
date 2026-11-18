@@ -18,7 +18,7 @@
 Art Institute of Chicago（Cloudflare 403）、Pexels/Pixabay/Unsplash（需 key）。
 
 用法：
-  uv run --no-project scripts/fetch_images_search.py <输出目录> <清单.tsv> [--keep-credits] [--workers 3]
+  uv run --no-project scripts/fetch_images_search.py <输出目录> <清单.tsv> [--workers 3]
   uv run --no-project scripts/fetch_images_search.py images m.tsv --sources commonscat,wikipedia
   uv run --no-project scripts/fetch_images_search.py images m.tsv --sources commons --workers 5 --sleep 2.5
 
@@ -26,7 +26,8 @@ Art Institute of Chicago（Cloudflare 403）、Pexels/Pixabay/Unsplash（需 key
   changbaishan-tianchi|Changbai Mountain Tianchi|3
   字段：<slug 前缀> | <检索词> | <要几张，默认 2> [| <最小宽度，默认 1000>]
 
-产物：<slug>-N.jpg、credits.jsonl、credits.snippet.js、manifest.json
+产物：<slug>-N.jpg、manifest.json。脚本只负责下载与去重；
+**图片是否为目标地点，由 AI 抓完后逐张看图确认**（脚本不做题材判断）。
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from lib import UA_BROWSER, Client, clean_author, md5_of
+from lib import UA_BROWSER, Client, md5_of
 
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 OPENVERSE_API = "https://api.openverse.org/v1/images/"
@@ -55,7 +56,7 @@ OK_MIME = {"image/jpeg", "image/png"}
 BAD_WORDS = ("map", "diagram", "logo", "icon", "seal", "flag", "chart", "svg", "coat of arms",
              "banner", "screenshot", "signature")
 # 每个图源自己的最小请求间隔（秒）；互不共享，所以能并行
-MIN_INTERVAL = {"commons": 3.5, "commonscat": 3.5, "openverse": 1.2, "wikipedia": 1.5}
+MIN_INTERVAL = {"commons": 3.5, "commonscat": 3.5, "openverse": 1.2, "wikipedia": 1.5, "web": 1.5}
 
 
 class Throttle:
@@ -77,7 +78,7 @@ class Throttle:
 class Fetcher:
     def __init__(self, sources: list[str]):
         self.sources = sources
-        # commons 源即使没被选中，也要有节流对象（分类检索与首图署名回查都会打它的 API）
+        # commons 源即使没被选中，也要有节流对象（分类检索与维基首图都要回查它的 API）
         self.throttle = {name: Throttle(MIN_INTERVAL[name]) for name in set(sources) | {"commons"}}
         if "commonscat" in sources:
             self.throttle["commonscat"] = self.throttle["commons"]
@@ -98,15 +99,15 @@ class Fetcher:
                 self.dead.add(source)
                 print(f"  [{source}] 连续失败 {self.failures[source]} 次，本批放弃该源", file=sys.stderr)
 
-    # ---------- 公共：按文件标题批量取图信息（含署名） ----------
+    # ---------- 公共：按文件标题批量取图信息 ----------
     def commons_info(self, titles: list[str], min_width: int) -> list[dict]:
-        """titles 形如 ["File:A.jpg", ...]；一次批量查询，返回带署名的候选。"""
+        """titles 形如 ["File:A.jpg", ...]；一次批量查询，返回可下载的候选。"""
         if not titles:
             return []
         self.throttle["commons"].wait()
         payload = self.client.get_json(COMMONS_API, {
             "action": "query", "titles": "|".join(titles[:40]),
-            "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata",
+            "prop": "imageinfo", "iiprop": "url|size|mime",
             "iiurlwidth": "1400", "format": "json",
         })
         items: list[dict] = []
@@ -117,12 +118,9 @@ class Fetcher:
                 continue
             if (info.get("mime") or "") not in OK_MIME or (info.get("width") or 0) < min_width:
                 continue
-            meta = info.get("extmetadata") or {}
             items.append({
                 "url": info.get("thumburl") or info.get("url"),
                 "title": title,
-                "author": clean_author((meta.get("Artist") or {}).get("value", "")),
-                "license": ((meta.get("LicenseShortName") or {}).get("value") or "Unknown").strip(),
                 "page": "https://commons.wikimedia.org/wiki/" + title.replace(" ", "_"),
             })
         return items
@@ -134,7 +132,7 @@ class Fetcher:
             "action": "query", "generator": "search",
             "gsrsearch": f"filetype:bitmap {term}", "gsrnamespace": "6",
             "gsrlimit": str(max(want * 4, 10)),
-            "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata",
+            "prop": "imageinfo", "iiprop": "url|size|mime",
             "iiurlwidth": "1400", "format": "json",
         })
         items: list[dict] = []
@@ -145,12 +143,9 @@ class Fetcher:
                 continue
             if (info.get("mime") or "") not in OK_MIME or (info.get("width") or 0) < min_width:
                 continue
-            meta = info.get("extmetadata") or {}
             items.append({
                 "url": info.get("thumburl") or info.get("url"),
                 "title": title,
-                "author": clean_author((meta.get("Artist") or {}).get("value", "")),
-                "license": ((meta.get("LicenseShortName") or {}).get("value") or "Unknown").strip(),
                 "page": "https://commons.wikimedia.org/wiki/" + title.replace(" ", "_"),
             })
         return items
@@ -171,7 +166,7 @@ class Fetcher:
     def openverse(self, term: str, want: int, min_width: int) -> list[dict]:
         self.throttle["openverse"].wait()
         payload = self.client.get_json(OPENVERSE_API, {
-            "q": term, "page_size": str(max(want * 4, 8)), "license_type": "all-cc",
+            "q": term, "page_size": str(max(want * 4, 8)),
         })
         items: list[dict] = []
         for row in payload.get("results") or []:
@@ -182,19 +177,9 @@ class Fetcher:
                 continue
             if not row.get("url"):
                 continue
-            raw_license = (row.get("license") or "").strip().lower()
-            version = (row.get("license_version") or "").strip()
-            if raw_license in {"by", "by-sa", "by-nd", "by-nc", "by-nc-sa", "by-nc-nd"}:
-                license_name = f"CC {raw_license.upper()}" + (f" {version}" if version else "")
-            elif raw_license in {"cc0", "pdm"}:
-                license_name = "CC0" if raw_license == "cc0" else "Public Domain Mark"
-            else:
-                license_name = f"{raw_license.upper()} {version}".strip() or "Unknown"
             items.append({
                 "url": row["url"],
                 "title": row.get("title") or term,
-                "author": clean_author(row.get("creator") or "Unknown"),
-                "license": license_name,
                 "page": row.get("foreign_landing_url") or row["url"],
             })
         return items
@@ -218,8 +203,29 @@ class Fetcher:
                     titles.append(f"File:{name}")
             if len(titles) >= want:
                 break
-        # 首图的作者/许可在 Commons 的 extmetadata 里，必须回查，不能凭空写
+        # 首图可能来自同名他地，抓下来必须目检
         return self.commons_info(titles[:want], min_width)
+
+    # ---------- 图源 5：公开网络（百度图片检索） ----------
+    def web(self, term: str, want: int, min_width: int) -> list[dict]:
+        self.throttle["web"].wait()
+        payload = self.client.get_json("https://image.baidu.com/search/acjson", {
+            "tn": "resultjson_com", "ipn": "rj", "word": term,
+            "pn": "0", "rn": str(max(want * 6, 24)),
+        }, headers={"Accept-Language": "zh-CN,zh;q=0.9", "Referer": "https://image.baidu.com/"})
+        items: list[dict] = []
+        for row in payload.get("data") or []:
+            if not row:
+                continue
+            url = row.get("middleURL") or row.get("hoverURL") or row.get("thumbURL")
+            if not url or any(word in url.lower() for word in BAD_WORDS):
+                continue
+            items.append({
+                "url": url,
+                "title": row.get("fromPageTitleEnc") or term,
+                "page": row.get("fromURL") or ("https://" + row["fromURLHost"]) if row.get("fromURLHost") else "https://image.baidu.com/",
+            })
+        return items
 
     def search(self, source: str, term: str, want: int, min_width: int) -> list[dict]:
         if source in self.dead:
@@ -249,10 +255,9 @@ def main() -> int:
     parser.add_argument("out_dir")
     parser.add_argument("manifest")
     parser.add_argument("--sleep", type=float, default=None, help="兼容旧参数：覆盖 commons 的间隔")
-    parser.add_argument("--sources", default="commons,commonscat,openverse,wikipedia",
-                        help="逗号分隔：commons,commonscat,openverse,wikipedia")
+    parser.add_argument("--sources", default="commons,commonscat,wikipedia,openverse,web",
+                        help="逗号分隔：commons,commonscat,wikipedia,openverse,web")
     parser.add_argument("--workers", type=int, default=3, help="并发任务数（每个图源内部仍各自限速）")
-    parser.add_argument("--keep-credits", action="store_true", help="增量模式：保留已有署名")
     args = parser.parse_args()
 
     sources = [name.strip() for name in args.sources.split(",") if name.strip() in MIN_INTERVAL]
@@ -269,19 +274,6 @@ def main() -> int:
         print(f"清单不存在: {manifest}", file=sys.stderr)
         return 1
     out.mkdir(parents=True, exist_ok=True)
-
-    credits_jsonl = out / "credits.jsonl"
-    snippet = out / "credits.snippet.js"
-    if args.keep_credits and credits_jsonl.is_file() and snippet.is_file() and credits_jsonl.stat().st_size:
-        lines = snippet.read_text(encoding="utf-8").splitlines()
-        if lines and lines[-1].strip() == "}":
-            lines.pop()
-        if lines:
-            lines[-1] = re.sub(r"\}\s*$", "},", lines[-1])
-        snippet.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    else:
-        credits_jsonl.write_text("", encoding="utf-8")
-        snippet.write_text("{\n", encoding="utf-8")
 
     seen_file = out / ".seen-md5"
     seen: dict[str, str] = {}
@@ -353,24 +345,9 @@ def main() -> int:
                 seen[digest] = name
                 with seen_file.open("a", encoding="utf-8") as handle:
                     handle.write(f"{digest} {name}\n")
-                record = {
-                    "slug": name, "file": str(target), "bytes": len(blob),
-                    "author": item["author"], "license": item["license"],
-                    "title": item["title"], "source": item["page"], "provider": source,
-                }
-                with credits_jsonl.open("a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-                with snippet.open("a", encoding="utf-8") as handle:
-                    author = item["author"].replace('"', "")
-                    license_name = item["license"].replace('"', "")
-                    title = item["title"].replace('"', "")
-                    handle.write(
-                        f'  "{name}": {{ author: "{author}", license: "{license_name}", '
-                        f'file: "{title}" }},\n'
-                    )
                 stats["ok"] += 1
                 got += 1
-                print(f"  {name:<26} {source:<10} {len(blob):>8} B  {item['license']:<14} {item['author']}")
+                print(f"  {name:<26} {source:<10} {len(blob):>8} B  {item.get('title', '')[:40]}")
         if got < want:
             with results_lock:
                 stats["failed"].append(f"{slug}({got}/{want})")
@@ -380,11 +357,6 @@ def main() -> int:
         for future in as_completed(futures):
             future.result()
 
-    lines = snippet.read_text(encoding="utf-8").splitlines()
-    if len(lines) > 1:
-        lines[-1] = re.sub(r",\s*$", "", lines[-1])
-    lines.append("}")
-    snippet.write_text("\n".join(lines) + "\n", encoding="utf-8")
     (out / "manifest.json").write_text(json.dumps({
         "total": stats["total"], "ok": stats["ok"], "failed": stats["failed"],
         "dir": str(out), "sources": sources,

@@ -14,7 +14,6 @@
   function imgSrc(id) {
     return "images/" + (/\.(jpe?g|png|webp|svg|avif)$/i.test(id) ? id : id + ".jpg");
   }
-  function creditOf(id) { return T.credits[id] || { author: "Unknown", license: "", file: "" }; }
 
   /* ---------- 0. 头部元信息 ---------- */
   function renderMeta() {
@@ -467,8 +466,6 @@
     heroImg.alt = p.name + " 代表性景观";
     heroImg.loading = "lazy";
     heroWrap.appendChild(heroImg);
-    var cred = creditOf(p.hero);
-    heroWrap.appendChild(el("figcaption", null, "图：" + cred.author + " / " + cred.license + " / Wikimedia Commons"));
     head.appendChild(heroWrap);
     root.appendChild(head);
 
@@ -541,7 +538,10 @@
     p.pois.forEach(function (poi) {
       var card = el("article", "poi");
       var shots = el("div", "shots");
-      poi.imgs.forEach(function (id, idx) {
+      if (!poi.imgs || !poi.imgs.length) {
+        shots.appendChild(el("div", "shot-empty", poi.noImageNote || "暂无实景图：公开来源未收录这个点位"));
+      }
+      (poi.imgs || []).forEach(function (id, idx) {
         var fig = el("figure", "shot");
         var im = el("img");
         im.src = imgSrc(id);
@@ -626,32 +626,6 @@
     p.costs.notes.forEach(function (n) { noteUl.appendChild(el("li", null, n)); });
     costSec.appendChild(noteUl);
     root.appendChild(costSec);
-
-    /* 3.7 图片署名 */
-    var creditSec = el("section", "block credits");
-    creditSec.appendChild(el("h3", "block-title", "图片来源与许可"));
-    var cUl = el("ul", "credit-list");
-    var seen = {};
-    var addCredit = function (id) {
-      if (seen[id]) return;
-      seen[id] = 1;
-      var c = creditOf(id);
-      var li = el("li");
-      li.appendChild(el("span", "cr-file", /\./.test(id) ? id : id + ".jpg"));
-      li.appendChild(el("span", "cr-meta", " · " + c.author + " · " + c.license + " · "));
-      var a = el("a", null, "Wikimedia Commons");
-      a.href = "https://commons.wikimedia.org/wiki/File:" + encodeURIComponent(c.file).replace(/%2F/g, "/").replace(/%3A/g, ":");
-      a.target = "_blank";
-      a.rel = "noopener";
-      li.appendChild(a);
-      cUl.appendChild(li);
-    };
-    addCredit(p.hero);
-    p.pois.forEach(function (poi) {
-      poi.imgs.forEach(addCredit);
-    });
-    creditSec.appendChild(cUl);
-    root.appendChild(creditSec);
 
     if (p.sources && p.sources.length) {
       var srcSec = el("section", "block sources");
@@ -872,12 +846,11 @@
 
   /* ---------- 5. 灯箱 ---------- */
   function openLightbox(id, title) {
-    var c = creditOf(id);
     var lb = $("#lightbox");
     var im = $("#lb-img");
     im.src = imgSrc(id);
     im.alt = title;
-    $("#lb-cap").textContent = title + " · 图：" + c.author + " / " + c.license;
+    $("#lb-cap").textContent = title;
     lb.classList.add("open");
     lb.setAttribute("aria-hidden", "false");
     document.body.classList.add("no-scroll");
