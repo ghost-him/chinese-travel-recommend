@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>元旦 4 天 · 泉州｜双城出发旅行推荐报告</title>
+<meta name="description" content="基于用户画像与双城出发条件的目的地评分、泉州 4 天行程、景点实景图、12306 实查车次票价与费用估算。">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand"><em>◆</em><span id="brand-text">旅行推荐报告</span></div>
+    <nav class="nav" aria-label="章节导航">
+      <a href="#profile">画像字段</a>
+      <a href="#score">地点群评选</a>
+      <a href="#plan">详细方案</a>
+      <a href="#fare">票价时效</a>
+      <a href="#sources">来源与使用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow">Travel Recommendation Report</span>
+      <h1 id="hero-title">元旦 4 天 · 泉州</h1>
+      <p class="hero-sub" id="hero-sub"></p>
+      <div class="chips" id="hero-chips"></div>
+      <div class="meta-row">
+        <span>出行窗口 <b data-trip-range></b></span>
+        <span class="dot">|</span>
+        <span>报告生成 <b id="meta-built"></b></span>
+        <span class="dot">|</span>
+        <span>票价查询 <b id="meta-fare"></b></span>
+        <span class="dot">|</span>
+        <span>参考乘车日 <b id="meta-ref"></b></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 01 画像 ================= -->
+  <section class="block" id="profile">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-no">01</span>
+        <h2 class="sec-title">先补齐这些字段，方案才算属于你</h2>
+      </div>
+      <p class="sec-desc">
+        下面是推荐引擎真正会读的输入。标「必填」的缺一项，结果就会退化成通用攻略；
+        标「建议」的只影响精度。右侧是本次用的示例数据——换成你的真实信息后，改 <code>js/data.js</code> 即可重算。
+      </p>
+
+      <div class="profile-grid">
+        <div class="card">
+          <h3>需要你提供的信息</h3>
+          <p class="card-sub">共 12 项，其中 5 项必填</p>
+          <div class="table-scroll" style="border:none;background:transparent">
+            <table id="profile-fields">
+              <thead>
+                <tr><th>字段</th><th>为什么需要</th><th>示例</th><th>优先级</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside class="card">
+          <h3>本次示例画像</h3>
+          <p class="card-sub">用于生成下面全部内容，可直接替换</p>
+          <div class="kv-list" id="profile-sample"></div>
+          <div class="notice">
+            <strong>关键约束：</strong>两人分别从上海、广州出发，只有 4 天，所以「会合成本」和「在途时间」的权重高于单纯的景点名气。
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 02 评选 ================= -->
+  <section class="block" id="score">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-no">02</span>
+        <h2 class="sec-title">5 个地点群，风格互不重复</h2>
+      </div>
+      <p class="sec-desc">
+        推荐单位是「群」，不是单个城市：同风格、彼此 2 小时内的目的地合并成一条线，一次玩完。
+        反例是青岛 / 威海 / 烟台——三城都在看海，并列成三个候选没有意义，它们只该是一个「胶东海岸群」。
+        群的大小随假期伸缩：1–2 天只留一个点，4 天多为一城，5 天以上才加第二城。
+      </p>
+
+      <div class="score-toolbar">
+        <div id="preset-switch" role="group" aria-label="权重预设"></div>
+      </div>
+      <p class="hint" id="score-hint">默认按「人文美食」加权；标「需 ≥5 天」的群超出本次 4 天窗口，只作长假定向，不参与首选。</p>
+
+      <div class="table-scroll">
+        <table id="score-table"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 03 方案 ================= -->
+  <section class="block" id="plan">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-no">03</span>
+        <h2 class="sec-title" id="plan-title">推荐方案</h2>
+      </div>
+      <p class="sec-desc">
+        首推方案按天展开；备选方案用同一套结构，差别写在各自的理由里。
+        「群内扩展」说明多一天去哪、坐什么、多少钱，不占用本次行程。
+      </p>
+
+      <div id="plan-tabs" role="tablist"></div>
+      <div id="plan-body"></div>
+    </div>
+  </section>
+
+  <!-- ================= 04 票价时效 ================= -->
+  <section class="block" id="fare">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-no">04</span>
+        <h2 class="sec-title">票价时效性：哪些是实查，哪些只是估算</h2>
+      </div>
+      <p class="sec-desc">
+        火车票价为 12306 实查（同车次，参考乘车日见页首）。目标日期若尚未开售，会在这里标注；
+        表中价格是「同车次当前售价」，不是出行日的成交价。
+      </p>
+
+      <div class="fare-panel">
+        <div class="fare-item">
+          <h4>实查记录</h4>
+          <p id="presale-observed"></p>
+        </div>
+        <div class="fare-item">
+          <h4>结论</h4>
+          <p id="presale-conclusion"></p>
+        </div>
+        <div class="fare-item">
+          <h4>风险提示</h4>
+          <p id="presale-risk"></p>
+        </div>
+      </div>
+
+      <div class="notice" style="margin-top:22px">
+        <strong>怎么读这些价格：</strong>
+        ① 高铁二等座为 12306 实查值，通常不随日期浮动，但节假日可能加开临客、部分 G 车执行浮动票价；
+        ② 机票、住宿、餐饮、门票为区间估算，已标注「估算」；
+        ③ 下单前请以 12306 / 航司 / 景区当日页面为准，本报告不构成报价。
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 05 来源 ================= -->
+  <section class="block" id="sources">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="sec-no">05</span>
+        <h2 class="sec-title">数据来源、图片许可与二次使用</h2>
+      </div>
+
+      <div class="profile-grid">
+        <div class="card">
+          <h3>数据来源</h3>
+          <div class="kv-list" style="margin-top:12px">
+            <div class="kv"><span class="k">车次票价</span><span class="v">中国铁路 12306 官方接口（queryG / queryTicketPrice），查询时间 <b id="src-query">—</b></span></div>
+            <div class="kv"><span class="k">参考乘车日</span><span class="v"><b id="src-ref">—</b>（与出行日班次结构一致）</span></div>
+            <div class="kv"><span class="k">图片</span><span class="v">Wikimedia Commons 或自有素材，许可逐张标注在方案末尾</span></div>
+            <div class="kv"><span class="k">气候与人文</span><span class="v">公开资料 + 本地一手攻略，属定性描述</span></div>
+            <div class="kv"><span class="k">评分为主观</span><span class="v">1–5 分，可按 <code>js/data.js</code> 中 <code>clusters</code> 自行修改</span></div>
+          </div>
+        </div>
+
+        <aside class="card">
+          <h3>怎么改成你的行程</h3>
+          <ol style="margin:12px 0 0;padding-left:20px;font-size:13.5px;display:grid;gap:6px">
+            <li>打开 <code>js/data.js</code>，先改 <code>meta</code> 与 <code>sampleProfile</code>。</li>
+            <li>改 <code>clusters</code>（5 个风格互斥的群）；详细方案在 <code>plans</code>，复制整段即可新增。</li>
+            <li>新增图片放进 <code>images/</code>，文件名即 <code>imgs</code> 里的 id，并在 <code>credits</code> 补署名。</li>
+            <li>整包压缩即可分享；双击 <code>index.html</code> 离线可看，无需服务器。</li>
+          </ol>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-grid">
+    <span><strong>报告口径：</strong>示例数据生成，供决策参考，不构成预订承诺。</span>
+    <span><strong>票价查询：</strong><b id="meta-fare-2"></b>　适用出行日：<b data-trip-range></b></span>
+    <span><strong>图片：</strong>Wikimedia Commons，署名见各方案末尾。</span>
+  </div>
+</footer>
+
+<div class="lightbox" id="lightbox" aria-hidden="true" role="dialog" aria-label="图片预览">
+  <button class="lb-close" id="lb-close" type="button" aria-label="关闭">×</button>
+  <div>
+    <img id="lb-img" alt="">
+    <p class="lb-cap" id="lb-cap"></p>
+  </div>
+</div>
+
+<noscript>
+  <div class="wrap" style="padding:24px 0">
+    <div class="notice">本报告依赖 JavaScript 渲染数据。请在浏览器中启用 JavaScript 后刷新。</div>
+  </div>
+</noscript>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
