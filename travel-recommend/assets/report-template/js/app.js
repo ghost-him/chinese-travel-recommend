@@ -135,6 +135,15 @@
       tdName.appendChild(el("strong", null, r.d.name));
       tdName.appendChild(el("span", "td-style", r.d.style));
       tdName.appendChild(el("span", "td-region", r.d.cities.join(" + ") + " · " + r.d.days));
+      if (r.d.seasonStatus && r.d.seasonStatus !== "ok") {
+        tdName.appendChild(el("span", "badge season-" + r.d.seasonStatus,
+          r.d.seasonStatus === "closed" ? "闭园/停航" : "非当季"));
+      }
+      if (r.d.userPicked) {
+        var pickText = "你点名";
+        if (r.d.overBudget > 0) pickText += " · 超 ¥" + Math.round(r.d.overBudget).toLocaleString("zh-CN");
+        tdName.appendChild(el("span", "badge badge-pick", pickText));
+      }
       tr.appendChild(tdName);
       dims.forEach(function (dm) {
         var v = r.d.s[dm.key] || 0;
@@ -162,6 +171,7 @@
       var tdNote = el("td");
       tdNote.colSpan = dims.length + 2;
       tdNote.appendChild(el("span", "note-main", r.d.note));
+      if (r.d.seasonNote) tdNote.appendChild(el("span", "note-season", "季节：" + r.d.seasonNote));
       tdNote.appendChild(el("span", "note-link", "群内：" + r.d.link));
       trNote.appendChild(tdNote);
       tbody.appendChild(trNote);
@@ -193,10 +203,183 @@
       var b = el("button", "tab" + (k === activePlan ? " active" : ""));
       b.type = "button";
       b.appendChild(el("span", "tab-name", p.name));
-      b.appendChild(el("span", "tab-verdict", (p.clusterLabel ? p.clusterLabel + " · " : "") + p.verdict));
+      b.appendChild(el("span", "tab-verdict", p.verdict));
       b.addEventListener("click", function () { activePlan = k; renderPlanTabs(); renderPlan(); });
       nav.appendChild(b);
     });
+  }
+
+  function renderSvgMap(p) {
+    if (!p.geo || !p.geo.cities || !p.geo.cities.length) return null;
+    var NS = "http://www.w3.org/2000/svg";
+    var cities = p.geo.cities;
+    var pois = (p.pois || []).filter(function (x) { return x.geo && x.geo.lat != null; });
+    var all = cities.concat(pois.map(function (x) { return { lat: x.geo.lat, lng: x.geo.lng }; }));
+    var lat0 = all.reduce(function (s, x) { return s + x.lat; }, 0) / all.length * Math.PI / 180;
+    function proj(x) { return { x: x.lng * Math.cos(lat0), y: -x.lat }; }
+    var q = all.map(proj);
+    var minX = Math.min.apply(null, q.map(function (v) { return v.x; }));
+    var maxX = Math.max.apply(null, q.map(function (v) { return v.x; }));
+    var minY = Math.min.apply(null, q.map(function (v) { return v.y; }));
+    var maxY = Math.max.apply(null, q.map(function (v) { return v.y; }));
+    var W = 720, H = 350, pad = 58;
+    var s = Math.min((W - 2 * pad) / (maxX - minX || 1), (H - 2 * pad) / (maxY - minY || 1));
+    var ox = pad + ((W - 2 * pad) - (maxX - minX) * s) / 2;
+    var oy = pad + ((H - 2 * pad) - (maxY - minY) * s) / 2;
+    function xy(x) {
+      var v = proj(x);
+      return [ox + (v.x - minX) * s, oy + (v.y - minY) * s];
+    }
+    var fig = el("figure", "plan-map");
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", p.name + " 路线示意图");
+
+    var line = document.createElementNS(NS, "polyline");
+    line.setAttribute("points", cities.map(function (c) {
+      var v = xy(c);
+      return v[0].toFixed(1) + "," + v[1].toFixed(1);
+    }).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", "var(--accent)");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("stroke-dasharray", "6 6");
+    line.setAttribute("opacity", ".5");
+    svg.appendChild(line);
+
+    cities.forEach(function (c) {
+      var v = xy(c);
+      var dot = document.createElementNS(NS, "circle");
+      dot.setAttribute("cx", v[0]);
+      dot.setAttribute("cy", v[1]);
+      dot.setAttribute("r", "5");
+      dot.setAttribute("fill", "var(--ink)");
+      svg.appendChild(dot);
+      var t = document.createElementNS(NS, "text");
+      t.setAttribute("x", v[0]);
+      t.setAttribute("y", v[1] - 13);
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-size", "13");
+      t.setAttribute("font-weight", "600");
+      t.setAttribute("fill", "var(--ink)");
+      t.textContent = c.name;
+      svg.appendChild(t);
+    });
+
+    pois.forEach(function (poi, i) {
+      var v = xy(poi.geo);
+      v[0] += poi.geo.jx || 0;
+      v[1] += poi.geo.jy || 0;
+      var ring = document.createElementNS(NS, "circle");
+      ring.setAttribute("cx", v[0]);
+      ring.setAttribute("cy", v[1]);
+      ring.setAttribute("r", "10");
+      ring.setAttribute("fill", "var(--surface)");
+      ring.setAttribute("stroke", "var(--accent)");
+      ring.setAttribute("stroke-width", "2");
+      svg.appendChild(ring);
+      var num = document.createElementNS(NS, "text");
+      num.setAttribute("x", v[0]);
+      num.setAttribute("y", v[1] + 4);
+      num.setAttribute("text-anchor", "middle");
+      num.setAttribute("font-size", "11");
+      num.setAttribute("font-weight", "700");
+      num.setAttribute("fill", "var(--accent)");
+      num.textContent = String(i + 1);
+      svg.appendChild(num);
+      var right = v[0] < W - 150;
+      var lab = document.createElementNS(NS, "text");
+      lab.setAttribute("x", v[0] + (right ? 15 : -15));
+      lab.setAttribute("y", v[1] + 4);
+      lab.setAttribute("text-anchor", right ? "start" : "end");
+      lab.setAttribute("font-size", "11");
+      lab.setAttribute("fill", "var(--muted)");
+      lab.textContent = poi.name;
+      svg.appendChild(lab);
+    });
+
+    fig.appendChild(svg);
+    var dense = pois.some(function (poi) { return poi.geo.jx || poi.geo.jy; });
+    fig.appendChild(el("figcaption", "map-cap",
+      "示意地图 · 按经纬度等距圆柱投影绘制，非瓦片底图；数字对应下方景点卡片顺序。" +
+      (dense ? "密集点位已做小幅屏幕避让。" : "")));
+    return fig;
+  }
+
+  var amapLoading = null;
+  function loadAmap(key, security) {
+    if (window.AMap && window.AMap.Map) return Promise.resolve(window.AMap);
+    if (amapLoading) return amapLoading;
+    amapLoading = new Promise(function (resolve, reject) {
+      if (security) window._AMapSecurityConfig = { securityJsCode: security };
+      var script = document.createElement("script");
+      script.src = "https://webapi.amap.com/loader.js";
+      script.onload = function () {
+        if (!window.AMapLoader) { reject(new Error("AMapLoader 未加载")); return; }
+        window.AMapLoader.load({ key: key, version: "2.0" }).then(resolve).catch(reject);
+      };
+      script.onerror = function () { reject(new Error("高德脚本加载失败")); };
+      document.head.appendChild(script);
+    });
+    return amapLoading;
+  }
+
+  function renderAmap(p) {
+    var fig = el("figure", "plan-map");
+    var box = el("div", "amap-box");
+    fig.appendChild(box);
+    fig.appendChild(el("figcaption", "map-cap",
+      "高德地图 · 需联网加载；点位按经纬度定位，数字顺序同下方景点卡片。"));
+    loadAmap(T.meta.amapKey, T.meta.amapSecurity).then(function (AMap) {
+      var first = p.geo.cities[0];
+      var map = new AMap.Map(box, { zoom: 8, center: [first.lng, first.lat], viewMode: "2D" });
+      var path = p.geo.cities.map(function (c) { return [c.lng, c.lat]; });
+      if (path.length > 1) {
+        map.add(new AMap.Polyline({
+          path: path, strokeColor: "#a8432a", strokeWeight: 3, strokeStyle: "dashed"
+        }));
+      }
+      p.geo.cities.forEach(function (c) {
+        map.add(new AMap.Marker({
+          position: [c.lng, c.lat], title: c.name,
+          label: { content: c.name, direction: "top" }
+        }));
+      });
+      (p.pois || []).forEach(function (poi, i) {
+        if (!poi.geo) return;
+        map.add(new AMap.Marker({
+          position: [poi.geo.lng, poi.geo.lat], title: poi.name,
+          content: '<span class="amap-pin">' + (i + 1) + "</span>",
+          offset: new AMap.Pixel(-11, -11)
+        }));
+      });
+      map.setFitView();
+    }).catch(function () {
+      var fallback = renderSvgMap(p);
+      if (!fallback) {
+        fig.innerHTML = "";
+        fig.appendChild(el("figcaption", "map-cap", "地图数据缺失：请补 geo.cities 与景点 geo。"));
+        return;
+      }
+      var note = fallback.querySelector(".map-cap");
+      if (note) note.textContent += "（高德地图加载失败，已自动切回离线 SVG）";
+      if (fig.parentNode) fig.parentNode.replaceChild(fallback, fig);
+    });
+    return fig;
+  }
+
+  function renderMap(p) {
+    if (T.meta && T.meta.mapMode === "amap" && T.meta.amapKey) return renderAmap(p);
+    return renderSvgMap(p);
+  }
+
+  function clusterOfPlan(p) {
+    var label = p.clusterLabel || "";
+    for (var i = 0; i < (T.clusters || []).length; i++) {
+      if (label.indexOf(T.clusters[i].name) === 0) return T.clusters[i];
+    }
+    return null;
   }
 
   function renderPlan() {
@@ -206,6 +389,16 @@
     var planTitle = $("#plan-title");
     if (planTitle) {
       planTitle.textContent = "推荐方案：" + p.name + (T.meta.tripDays ? " · " + T.meta.tripDays + " 天" : "");
+    }
+
+    var planCluster = clusterOfPlan(p);
+    if (planCluster && planCluster.seasonStatus && planCluster.seasonStatus !== "ok") {
+      var alertBox = el("div", "season-alert " + planCluster.seasonStatus);
+      alertBox.appendChild(el("strong", null,
+        planCluster.seasonStatus === "closed" ? "季节提示：闭园 / 停航" : "季节提示：非当季"));
+      alertBox.appendChild(document.createTextNode(
+        " " + (planCluster.seasonNote || "这个月份不适合，换季再来。")));
+      root.appendChild(alertBox);
     }
 
     /* 3.1 标题与理由 */
@@ -228,6 +421,9 @@
     heroWrap.appendChild(el("figcaption", null, "图：" + cred.author + " / " + cred.license + " / Wikimedia Commons"));
     head.appendChild(heroWrap);
     root.appendChild(head);
+
+    var map = renderMap(p);
+    if (map) root.appendChild(map);
 
     /* 3.2 风土人情 */
     var customs = el("section", "block");
@@ -311,6 +507,12 @@
       var body = el("div", "poi-body");
       var title = el("div", "poi-title");
       title.appendChild(el("h4", null, poi.name));
+      if (poi.status && poi.status !== "open") {
+        var statusLabels = { "off-season": "非当季", closed: "暂停开放", limited: "限流/部分开放" };
+        var badge = el("span", "poi-status " + poi.status, statusLabels[poi.status] || poi.status);
+        if (poi.statusNote) badge.title = poi.statusNote;
+        title.appendChild(badge);
+      }
       var tags = el("div", "tags");
       poi.tags.forEach(function (t) { tags.appendChild(el("span", "tag", t)); });
       title.appendChild(tags);
@@ -318,12 +520,14 @@
       if (poi.intro) body.appendChild(el("p", "poi-intro", poi.intro));
 
       var facts = el("dl", "facts");
-      [
+      var factRows = [
         ["门票", poi.ticket],
         ["建议时长", poi.dur],
-        ["开放时间", poi.hours],
-        ["怎么去", poi.access]
-      ].forEach(function (kv) {
+        ["开放时间", poi.hours]
+      ];
+      if (poi.entry) factRows.push(["入口", poi.entry]);
+      factRows.push(["怎么去", poi.access]);
+      factRows.forEach(function (kv) {
         var row = el("div", "fact");
         row.appendChild(el("dt", null, kv[0]));
         row.appendChild(el("dd", null, kv[1]));
@@ -339,9 +543,9 @@
 
     /* 3.5 交通 */
     var trSec = el("section", "block");
-    trSec.appendChild(el("h3", "block-title", "怎么去：12306 实查班次与二等座票价"));
-    trSec.appendChild(transportTable("去程", p.transport.out, "out"));
-    if (p.transport.back.length) trSec.appendChild(transportTable("回程", p.transport.back, "back"));
+    trSec.appendChild(el("h3", "block-title", "怎么去：高铁 12306 实查，机票为区间估算"));
+    if (p.transport.out && p.transport.out.length) trSec.appendChild(transportTable("去程", p.transport.out, "out"));
+    if (p.transport.back && p.transport.back.length) trSec.appendChild(transportTable("回程", p.transport.back, "back"));
 
     if (p.transport.flights && p.transport.flights.length) {
       var fl = el("div", "flight-box");
@@ -398,6 +602,22 @@
     });
     creditSec.appendChild(cUl);
     root.appendChild(creditSec);
+
+    if (p.sources && p.sources.length) {
+      var srcSec = el("section", "block sources");
+      srcSec.appendChild(el("h3", "block-title", "本方案情报来源：官方公告与本地经验"));
+      var intel = el("ul", "intel-list");
+      p.sources.forEach(function (s) {
+        var li = el("li");
+        li.appendChild(el("span", "intel-claim", s.claim));
+        li.appendChild(el("span", "intel-meta", s.source + " · 核对 " + s.date));
+        intel.appendChild(li);
+      });
+      srcSec.appendChild(intel);
+      srcSec.appendChild(el("p", "intel-foot",
+        "门票、开放时间、预约规则以景区当日公告为准；本地经验只用于错峰、入口、价格等体验层信息。"));
+      root.appendChild(srcSec);
+    }
   }
 
   function transportTable(label, rows, kind) {
@@ -425,7 +645,8 @@
       tdP.appendChild(el("span", "cls", r.cls));
       tr.appendChild(tdP);
       var tdFlag = el("td");
-      tdFlag.appendChild(el("span", "badge badge-real", "12306 实查"));
+      var est = r.tag === "est" || /飞机|航班/.test((r.mode || "") + (r.cls || ""));
+      tdFlag.appendChild(el("span", "badge " + (est ? "badge-est" : "badge-real"), est ? "估算" : "12306 实查"));
       tr.appendChild(tdFlag);
       tb.appendChild(tr);
       if (r.note) {
@@ -484,12 +705,12 @@
 
       var stayTotal = stay * c.nights * rooms;
       var rows = [
-        { k: "大交通（往返）", a: c.rail.A, b: c.rail.B, tag: "real" },
-        { k: "住宿（" + c.nights + " 晚 × " + rooms + " 间，分摊）", a: stayTotal / people, b: stayTotal / people, tag: "est" },
-        { k: "餐饮（" + c.days + " 天）", a: food * c.days, b: food * c.days, tag: "est" },
-        { k: "市内交通（" + c.days + " 天）", a: c.localPerDay * c.days, b: c.localPerDay * c.days, tag: "est" },
-        { k: "门票", a: c.tickets, b: c.tickets, tag: "est" },
-        { k: "体验项目", a: c.experiences, b: c.experiences, tag: "est" }
+        { k: "大交通（往返）", a: c.rail.A, b: c.rail.B, tagA: c.rail.tagA || "est", tagB: c.rail.tagB || "est" },
+        { k: "住宿（" + c.nights + " 晚 × " + rooms + " 间，分摊）", a: stayTotal / people, b: stayTotal / people, tagA: "est", tagB: "est" },
+        { k: "餐饮（" + c.days + " 天）", a: food * c.days, b: food * c.days, tagA: "est", tagB: "est" },
+        { k: "市内交通（" + c.days + " 天）", a: c.localPerDay * c.days, b: c.localPerDay * c.days, tagA: "est", tagB: "est" },
+        { k: "门票", a: c.tickets, b: c.tickets, tagA: "est", tagB: "est" },
+        { k: "体验项目", a: c.experiences, b: c.experiences, tagA: "est", tagB: "est" }
       ];
       var subA = 0, subB = 0;
       rows.forEach(function (r) { subA += r.a; subB += r.b; });
@@ -507,16 +728,15 @@
       var tb = el("tbody");
       rows.forEach(function (r) {
         var tr = el("tr");
-        var tdK = el("td", null, r.k);
-        tdK.appendChild(el("span", "badge badge-inline " + (r.tag === "real" ? "badge-real" : "badge-est"),
-          r.tag === "real" ? "实查" : "估算"));
-        tr.appendChild(tdK);
-        tr.appendChild(el("td", "num", money(r.a)));
-        tr.appendChild(el("td", "num", money(r.b)));
-        var td = el("td");
-        td.appendChild(el("span", "badge " + (r.tag === "real" ? "badge-real" : "badge-est"),
-          r.tag === "real" ? "12306 实查" : "估算"));
-        tr.appendChild(td);
+        tr.appendChild(el("td", null, r.k));
+        [[r.a, r.tagA], [r.b, r.tagB]].forEach(function (pair) {
+          var td = el("td", "num");
+          td.appendChild(document.createTextNode(money(pair[0]) + " "));
+          td.appendChild(el("span", "badge badge-inline " + (pair[1] === "real" ? "badge-real" : "badge-est"),
+            pair[1] === "real" ? "实查" : "估算"));
+          tr.appendChild(td);
+        });
+        tr.appendChild(el("td", null, "按侧标注"));
         tb.appendChild(tr);
       });
       var trSub = el("tr", "row-sub");
@@ -555,9 +775,42 @@
       out.appendChild(cscroll);
 
       var bar = el("p", "budget-hint");
-      bar.textContent = "对照示例预算人均 ¥2,700：上海出发 " + (subA + bufA <= 2700 ? "在预算内" : "超出 " + money(subA + bufA - 2700)) +
-        "；广州出发 " + (subB + bufB <= 2700 ? "在预算内" : "超出 " + money(subB + bufB - 2700)) + "。";
-      out.appendChild(bar);
+      var sideA = subA + bufA, sideB = subB + bufB;
+      var mode = T.meta.budgetMode || "per_person";
+      function rel(value, cap) {
+        return value <= cap ? "在预算内，余 " + money(cap - value) : "超出 " + money(value - cap);
+      }
+      var text = "";
+      if (mode === "shared" && T.meta.budgetCap) {
+        var totalCap = T.meta.budgetCap;
+        var totalSpend = sideA + sideB;
+        text = "两人合计 " + money(totalSpend) + "，对照共同预算 " + money(totalCap) + "：" +
+          (totalSpend <= totalCap
+            ? "在预算内，余 " + money(totalCap - totalSpend)
+            : "超出 " + money(totalSpend - totalCap)) +
+          "（" + c.rail.labelA + " " + money(sideA) + " / " + c.rail.labelB + " " + money(sideB) + "）。";
+      } else {
+        var capA = T.meta.budgetCapA != null ? T.meta.budgetCapA : T.meta.budgetCap;
+        var capB = T.meta.budgetCapB != null ? T.meta.budgetCapB : capA;
+        if (capA != null || capB != null) {
+          capA = capA == null ? capB : capA;
+          capB = capB == null ? capA : capB;
+          if (mode === "uniform") {
+            var high = Math.max(capA, capB), low = Math.min(capA, capB);
+            text = "统一上限 " + money(high) + "：" + c.rail.labelA + " " + rel(sideA, high) +
+              "；" + c.rail.labelB + " " + rel(sideB, high) +
+              "。按较低上限 " + money(low) + " 两人合计超出 " +
+              money(Math.max(0, sideA - low) + Math.max(0, sideB - low)) + "。";
+          } else {
+            text = "各自上限：" + c.rail.labelA + " " + money(capA) + " " + rel(sideA, capA) +
+              "；" + c.rail.labelB + " " + money(capB) + " " + rel(sideB, capB) + "。";
+          }
+        }
+      }
+      if (text) {
+        bar.textContent = text;
+        out.appendChild(bar);
+      }
     }
 
     [inPeople, inRooms, inStay, inFood].forEach(function (i) {

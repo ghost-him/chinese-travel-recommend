@@ -14,6 +14,13 @@ window.TRIP = {
     tripStart: "2026-02-01",
     tripEnd: "2026-02-04",
     tripDays: 4,
+    budgetCap: 2700,
+    budgetCapA: 2700,
+    budgetCapB: 2700,
+    budgetMode: "per_person",
+    mapMode: "svg",
+    amapKey: "",
+    amapSecurity: "",
     chips: ["4 天 3 晚", "示例出发地 A + B", "人均 ¥2k–3k", "推荐单位：地点群"],
     currency: "CNY",
     source: "中国铁路 12306 官方接口（queryG / queryTicketPrice 实查）",
@@ -31,6 +38,7 @@ window.TRIP = {
     { key: "dates", label: "出行日期与可浮动范围", why: "假期前后价差可达数倍", example: "2026-02-01 ~ 02-04，可浮动 1 天", required: true },
     { key: "duration", label: "假期长度（含在途）", why: "决定群里有几个城市", example: "4 天 3 晚", required: true },
     { key: "budget", label: "预算上限（人均 / 总）", why: "先定上限再选群", example: "人均 3000 元（含大交通）", required: true },
+    { key: "budgetMode", label: "预算口径：共同 / 各自 / 统一", why: "多人不同上限时决定怎么算超支", example: "各自上限：A ¥4000 / B ¥3000", required: true },
     { key: "transport", label: "交通偏好与可接受最长在途", why: "决定高铁还是飞机、能否跨城", example: "高铁优先，单程 ≤ 7 小时", required: false },
     { key: "interests", label: "兴趣权重", why: "决定评分权重", example: "人文 40% / 美食 40% / 摄影 20%", required: false },
     { key: "pace", label: "体力与节奏", why: "决定每天排几个点", example: "中等，日均 1.2 万步", required: false },
@@ -71,6 +79,8 @@ window.TRIP = {
       id: "c1", name: "示例人文群", style: "人文 · 古城",
       cities: ["示例城A", "示例城B"], days: "3–5 天", fit: [3, 5],
       link: "示例城A ↔ 示例城B 动车 30 分钟，¥50",
+      seasonStatus: "ok", seasonNote: "示例：当季，白天 15℃ 左右",
+      userPicked: false, overBudget: null,
       s: { season: 4, culture: 5, food: 4, access: 4, link: 5, cost: 4, crowd: 4 },
       note: "为什么会进前五：一句话说清「为什么是它」和「为什么不是第二名」。"
     },
@@ -78,6 +88,8 @@ window.TRIP = {
       id: "c2", name: "示例美食群", style: "美食 · 市集",
       cities: ["示例城C", "示例城D"], days: "2–4 天", fit: [2, 4],
       link: "示例城C ↔ 示例城D 城际 25 分钟，¥15",
+      seasonStatus: "ok", seasonNote: "示例：全年可去，避开节假日排队",
+      userPicked: false, overBudget: null,
       s: { season: 4, culture: 3, food: 5, access: 3, link: 5, cost: 5, crowd: 4 },
       note: "以吃为主线；写清哪座城吃早、哪座城吃夜宵。"
     },
@@ -85,6 +97,8 @@ window.TRIP = {
       id: "c3", name: "示例海滨群", style: "海滨 · 度假",
       cities: ["示例城E", "示例城F", "示例城G"], days: "5–7 天", fit: [5, 7],
       link: "E→F 高铁 1h40；F→G 轮渡 40 分钟",
+      seasonStatus: "off", seasonNote: "示例：冬季停航/风大，换季再来",
+      userPicked: false, overBudget: null,
       s: { season: 2, culture: 3, food: 4, access: 2, link: 4, cost: 3, crowd: 3 },
       note: "三城同质必须合并成一泳线；4 天窗口不成立。"
     },
@@ -92,6 +106,8 @@ window.TRIP = {
       id: "c4", name: "示例古都群", style: "历史 · 古都",
       cities: ["示例城H", "示例山I"], days: "4–5 天", fit: [4, 5],
       link: "H 城 → I 山 高铁 35 分钟",
+      seasonStatus: "ok", seasonNote: "示例：秋季最好，冬季山岳项目看天气",
+      userPicked: false, overBudget: null,
       s: { season: 2, culture: 5, food: 4, access: 3, link: 4, cost: 4, crowd: 3 },
       note: "人文最厚，但冬季体感差；山岳项目受天气影响。"
     },
@@ -99,6 +115,8 @@ window.TRIP = {
       id: "c5", name: "示例冰雪群", style: "冰雪 · 冬季限定",
       cities: ["示例城J", "示例镇K"], days: "4–6 天", fit: [4, 6],
       link: "J 城 → K 镇 高铁 1.5 小时",
+      seasonStatus: "ok", seasonNote: "示例：12–2 月是冰雪季",
+      userPicked: true, overBudget: 800,
       s: { season: 1, culture: 3, food: 4, access: 2, link: 4, cost: 2, crowd: 2 },
       note: "季节限定，溢价最高；对短假不友好。"
     }
@@ -120,6 +138,10 @@ window.TRIP = {
       tagline: "一句话定位 · 一句最有画面感的描述",
       verdict: "模板占位",
       clusterLabel: "示例人文群 · 主城",
+      geo: { cities: [
+        { name: "示例城A", lat: 31.230, lng: 121.470 },
+        { name: "示例城B", lat: 30.270, lng: 120.160 }
+      ] },
       hero: "placeholder-1.svg",
       why: [
         "第一条理由：用数据说话（车程、票价、天数），不要写形容词。",
@@ -143,7 +165,9 @@ window.TRIP = {
       pois: [
         {
           name: "景点一", imgs: ["placeholder-1.svg", "placeholder-2.svg"],
+          geo: { lat: 31.232, lng: 121.475 },
           ticket: "免费（以公告为准）", dur: "2 h", hours: "08:00–17:30",
+          status: "open", entry: "1 号门（南门）",
           access: "从住处步行 10 分钟",
           intro: "60–150 字：是什么、为什么值得、看什么。要跟上面的风土人情呼应，而不是重复门票信息。",
           tip: "一条与介绍不重复的实用信息：错峰时段、入口、排号、着装。",
@@ -151,7 +175,9 @@ window.TRIP = {
         },
         {
           name: "景点二", imgs: ["placeholder-3.svg", "placeholder-4.svg"],
+          geo: { lat: 30.275, lng: 120.155 },
           ticket: "约 ¥50（估算，以公告为准）", dur: "1.5 h", hours: "09:00–17:00",
+          status: "open", entry: "东门游客中心",
           access: "打车 15 分钟，约 ¥30",
           intro: "第二处景点同样要写「是什么 / 为什么值得 / 看什么」，不要只写一句「很值得去」。",
           tip: "写本地人给的细节，例如几点人最少、从哪个门进。",

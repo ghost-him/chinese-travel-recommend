@@ -767,3 +767,70 @@ footer strong { color: var(--ink-soft); }
   a { color: inherit; text-decoration: none; }
   .tr-table, .cost-table, .table-scroll { border-color: #bbb; }
 }
+
+/* ---------- 路线地图（经纬度 SVG，离线） ---------- */
+.plan-map {
+  margin: 0 0 22px;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.plan-map svg { width: 100%; height: auto; display: block; }
+.plan-map .map-cap { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+
+/* ---------- 本方案情报来源 ---------- */
+.intel-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.intel-list li {
+  display: grid; gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.intel-claim { font-size: 13.5px; color: var(--ink); }
+.intel-meta { font-size: 11.5px; color: var(--muted); }
+.intel-foot { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+/* ---------- 高德地图（可选，需 key + 联网） ---------- */
+.amap-box { height: 360px; width: 100%; border-radius: 10px; overflow: hidden; background: var(--paper); }
+.amap-pin {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--accent);
+  color: var(--accent); font-size: 11px; font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+}
+
+/* ---------- 季节状态 / 用户点名 ---------- */
+.season-off { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold); }
+.season-closed { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+.badge-pick { background: var(--teal-soft); color: var(--teal); border: 1px solid var(--teal); }
+.note-season { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* ---------- 季节警示 / 景点状态 ---------- */
+.season-alert {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--gold);
+  background: var(--gold-soft);
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.season-alert strong { color: var(--gold); }
+.season-alert.closed { border-color: var(--accent); background: var(--accent-soft); }
+.season-alert.closed strong { color: var(--accent); }
+.poi-status {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--gold);
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+.poi-status.closed { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.poi-status.limited { border-color: var(--teal); background: var(--teal-soft); color: var(--teal); }
