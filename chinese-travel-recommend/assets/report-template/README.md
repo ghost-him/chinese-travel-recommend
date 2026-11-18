@@ -1,6 +1,6 @@
 # 报告模板（report-template）
 
-这是 `travel-recommend` skill 自带的 HTML 报告模板，可直接双击 `index.html` 打开。
+这是 `chinese-travel-recommend` skill 自带的 HTML 报告模板，可直接双击 `index.html` 打开。
 **不要从零写页面，也不要依赖任何示例报告**——模板已包含全部前端代码。
 
 ```

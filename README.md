@@ -1,168 +1,186 @@
-# travel-recommend
+# chinese-travel-recommend
 
-把一个「放假去哪玩」的模糊念头，变成一份**能直接照着订票**的离线图文报告。
+**English** · [简体中文](README.zh-CN.md)
 
-不是列十个网红城市，而是：问清条件 → 排除不可行的 → 按你的权重打分 → 只查实价 → 输出双击就能打开的 HTML 文件夹（行程、景点实景图、车次票价、费用表、路线地图）。
+Turn a vague "where should we go for the holiday?" into a **bookable, offline, illustrated HTML report**.
 
-- 版本：**1.6.0**｜许可：MIT
-- 方法论在 [`travel-recommend/SKILL.md`](travel-recommend/SKILL.md)，本文只讲**怎么用、产出什么、边界在哪**
+It does not hand you a list of ten trending cities. It asks the questions that actually decide the trip, filters out destinations that cannot work, scores the rest against *your* weights, quotes only prices it really looked up, and ships a folder you double-click (itinerary, real photos, rail/air prices, cost table, route map).
+
+Built for travel inside mainland China: it knows the 12306 presale window, Chinese holiday pricing, and carries a queryable library of 163 domestic attractions.
+
+- Version: **1.8.3** · License: MIT
+- Methodology lives in [`chinese-travel-recommend/SKILL.md`](chinese-travel-recommend/SKILL.md); this file covers **how to use it, what it produces, and where it stops**
 
 ---
 
-## 什么时候用它
+## When to use it
 
-| 你会这样说 | 它做什么 |
+| You say | It does |
 |---|---|
-| 「国庆 5 天，从杭州出发，能去哪？」 | 按假期长度圈定半径，给出若干互斥的地点群 + 每个群的完整方案 |
-| 「我和朋友一个在北京一个在广州，去哪会合？」 | 先问预算怎么算：共同 / 各自 / 统一；不默认把一个人的上限强加给另一个人 |
-| 「预算 4000 一个人，够去哪？」 | 先砍预算不可行的目的地；**你点名的地方不砍**，写清会超多少 |
-| 「我们之前聊过想去敦煌」 | 敦煌必须进候选，并单独出一份完整方案 |
-| 「这些地方我去过一半了」 | 深挖前先给你过目，去过/不想去的**整群换掉** |
-| 「7 月想去哈尔滨」 | 过季节门槛；冰雪大世界非当季会显著提示，而不是硬排进行程 |
+| "5 days off around National Day, leaving from Hangzhou — where can we go?" | Bounds the radius by trip length, proposes mutually exclusive location clusters, each with a full plan |
+| "I'm in Beijing, my friend is in Guangzhou — where should we meet?" | Asks how to split the budget first (shared / per-person caps / uniform cap) instead of forcing one person's cap on the other |
+| "¥4,000 per person — is that enough?" | Drops destinations that fail the budget check; **places you named are kept**, with the overrun spelled out |
+| "We talked about going to Dunhuang" | Dunhuang must appear as a candidate with its own complete plan |
+| "I've already been to half of these" | Shows the shortlist before digging; visited/disliked clusters are replaced as a whole |
+| "Harbin in July" | Runs the season gate; Ice World is flagged off-season instead of being quietly scheduled |
 
-不适用的场景：只想要一张景点清单（太重）、已经在目的地只想排市内路线（用地图 App 更快）、需要代订票（本 skill 只查价不代购）。
+Not a good fit: a plain list of attractions (too heavy), in-city routing only (a maps app is faster), or booking on your behalf (this skill checks prices, it does not purchase).
 
 ---
 
-## 一分钟上手
+## Quick start
 
 ```text
-用 travel-recommend 帮我规划：国庆 5 天，我从杭州东出发，朋友从广州南出发，人均 4000
+Use chinese-travel-recommend to plan: 5 days off, I leave from Hangzhou East,
+my friend from Guangzhou South, budget ¥4,000 per person.
 ```
 
-Agent 会先问几轮（不是一次性甩 12 个问题）：
+The agent asks a few rounds of questions — not twelve at once:
 
-1. **第 0 问**：你们之前聊过想去哪？有没有备选？——有的话必须进候选。
-2. **5 个硬字段**：出发地（车站/机场）、同行者与各自出发地、日期与浮动天数、总天数、人均预算上限。
-3. **预算口径**：共同总预算 / 各自上限 / 统一上限——两个人的距离和收入不同，不能默认按最差者算。
-4. **地图模式**：离线 SVG（默认，双击即开）/ 高德 key（需联网，用户自己申请）。
+1. **Question 0**: have you and your companion already talked about places you want to go? Any shortlist? Everything mentioned must become a candidate.
+2. **Five required fields**: origin (city + station/airport), companions and their origins, dates and float, total days, budget cap.
+3. **Budget mode**: shared total / per-person caps / uniform cap — two people rarely have the same distance or income.
+4. **Map mode**: offline SVG (default, opens by double-click) or an AMap JS API key (needs network, user-provided).
 
-问清后复述一遍给你确认，然后才开始干活。**缺任何一项都会停下来问，不会拿示例数据糊一份给你。**
+Then it restates all six confirmations and waits for your OK. **Missing any field stops the process — it will not fill gaps with sample data.**
+
+Requirements: [`uv`](https://docs.astral.sh/uv/) and Python 3.11+. Every script declares its own dependencies in a PEP 723 header, so `uv` installs them on the fly; no `pip install`, no Node, no Git Bash required.
 
 ---
 
-## 流程
+## Flow
 
 ```mermaid
 flowchart TD
-  A[第 0 问<br/>有没有备选] --> B[5 个硬字段<br/>+ 预算口径 + 地图模式]
-  B --> C[季节门槛<br/>反季 / 闭园先排除]
-  C --> D[硬筛<br/>在途 / 预算 / 气候]
-  D --> E[组群<br/>同省或相邻省]
-  E --> F[子 agent 预审<br/>景点级：开放/入口/预约/季节]
-  F --> G[候选回看<br/>去过 / 不想去 → 整群换掉]
-  G --> H[按权重打分<br/>按预算口径算超支]
-  H --> I[本地一手资料<br/>避坑 / 时段 / 老字号]
-  I --> J[排行程 + 景点卡片]
-  J --> K[12306 实查票价]
-  K --> L[生成 HTML + 地图]
+  A[Question 0<br/>existing shortlist] --> B[5 required fields<br/>+ budget mode + map mode]
+  B --> C[Season gate<br/>off-season / closed first]
+  C --> D[Hard filter<br/>transit / budget / climate]
+  D --> E[Clustering<br/>same or adjacent province]
+  E --> F[Sub-agent pre-check<br/>per attraction: hours / entry / booking]
+  F --> G[Shortlist review<br/>visited or unwanted → replace cluster]
+  G --> H[Weighted scoring<br/>overrun by budget mode]
+  H --> I[Local first-hand research<br/>pitfalls / timing / local food]
+  I --> J[Itinerary + attraction cards]
+  J --> K[12306 fare lookup]
+  K --> L[Generate HTML + map]
   L --> M[verify_report.py]
-  M --> N[子 agent 终审]
-  N --> O[打包 zip]
+  M --> N[Sub-agent final review]
+  N --> O[Package zip]
 ```
 
-写死的几个硬步骤：
+Non-negotiable steps:
 
-- **C 季节门槛**：每个群有 `seasonStatus`（ok/off/closed）；反季标 `off`，闭园直接淘汰。
-- **F 预审**：提示词在 `travel-recommend/prompts/season-factcheck.md`，必须核到**每个景点**：当前是否开放、从哪个门进、停止入场时间、预约方式、季节错配。
-- **G 候选回看**：先把群清单给你看，问「哪些去过、哪些不想去」。去过的整群替换。
-- **N 终审**：提示词在 `travel-recommend/prompts/final-review.md`，`FAIL` 必须修完再打包。
+- **Season gate** — every cluster carries `seasonStatus` (`ok` / `off` / `closed`); off-season is marked, closed is dropped.
+- **Pre-check** — prompt at `chinese-travel-recommend/prompts/season-factcheck.md`, verified **per attraction**: open today, which gate, last entry, booking method, season mismatch.
+- **Shortlist review** — the cluster list goes to you before research; visited or unwanted clusters are replaced whole.
+- **Final review** — prompt at `chinese-travel-recommend/prompts/final-review.md`; a `FAIL` must be fixed before packaging.
 
 ---
 
-## 产出物
+## What you get
 
 ```
 travel-report/
-├─ index.html          # 双击就开，不联网（amap 模式除外）
+├─ index.html          # opens offline (except amap mode)
 ├─ css/style.css
-├─ js/data.js          # ★ 只有这个要改：画像 / 群 / 行程 / 票价 / 署名
-├─ js/app.js           # 渲染逻辑
-├─ images/             # 实景图（每个景点 ≥2 张，上不封顶）+ 逐张署名
-└─ README.md           # 数据来源、假设清单、怎么改
+├─ js/data.js          # ★ the only file to edit: profile / clusters / itinerary / fares / credits
+├─ js/app.js           # rendering logic
+├─ images/             # 4–6 per attraction (6–10 for landmarks), credited one by one
+└─ README.md           # sources, assumptions, how to edit
 ```
 
-报告里有什么：
+Inside the report:
 
-- **地点群评分表**：7 个维度加权；标出季节状态、是否你点名、超预算多少
-- **每个群一套完整方案**：逐日行程、景点卡片（介绍 + 门票 + 时长 + 开放时间 + **状态 + 入口** + 怎么去 + 一条实用提示）、往返车次与票价、费用计算器
-- **景点级季节警示**：闭园/非当季的景点有 badge，方案顶部有 alert；反季不会只藏在提示里
-- **票价三件套**：查询时间 + 参考乘车日 + 「实查 / 估算」；未开售明确写「尚未开售」，不会伪装成「无车」
-- **路线地图**：默认按真实经纬度投影的 SVG；有高德 key 可切在线地图，失败自动回退
-- **费用计算器**：改人数 / 房价即时重算；按 `shared / per_person / uniform` 分别判断超支
+- **Cluster scorecard**: seven weighted dimensions, season status, whether you named it, budget overrun.
+- **A complete plan per cluster**: day-by-day itinerary, attraction cards (intro + ticket + duration + hours + **status + gate** + how to get there + one practical tip), rail/flight options with fares, cost calculator.
+- **Attraction-level season warnings**: closed or off-season items get a badge and a top-of-plan alert — never buried in a tip.
+- **Fare provenance**: query time + reference travel date + verified/estimated, plus "not yet on sale" instead of "no train".
+- **Route map**: SVG projected from real coordinates by default; AMap only with the user's key, with automatic fallback.
+- **Cost calculator**: changing headcount or room rate recomputes instantly; overrun is judged under `shared` / `per_person` / `uniform`.
 
 ---
 
-## 目录
+## Repository layout
 
-以下路径相对本 README 所在目录（skill 本体在 `travel-recommend/` 里）：
+Paths are relative to this README; the skill itself lives in `chinese-travel-recommend/`.
 
-| 路径 | 作用 |
+| Path | Purpose |
 |---|---|
-| `travel-recommend/SKILL.md` | 方法论：输入契约、季节门槛、组群、评分、票价纪律、验证清单、反模式 |
-| `travel-recommend/prompts/season-factcheck.md` | 给用户看名单前的景点级事实核查提示词 |
-| `travel-recommend/prompts/final-review.md` | 交付前的整体审核提示词 |
-| `travel-recommend/assets/report-template/` | 报告模板，空数据也能打开；含 4 张 SVG 占位图 |
-| `travel-recommend/scripts/fetch_rail_fares.py` | 12306 车次 + 各席别实价（自动 cookie、核对上车站） |
-| `travel-recommend/scripts/fetch_images.py` | Commons 批量抓图；Pillow 校验、md5 去重、自动署名 |
-| `travel-recommend/scripts/verify_report.py` | 静态自检：图片/署名/价格/季节/预算口径/群↔方案映射 |
-| `travel-recommend/scripts/package_report.py` | 先自检再打 zip，保留顶层目录 |
-| `travel-recommend/scripts/calc_budget.py` | 与页面同公式的预算复算 |
-| `travel-recommend/scripts/lib.py` | 公共函数（requests 会话、重试、md5、署名清洗） |
+| `chinese-travel-recommend/SKILL.md` | Methodology: input contract, season gate, clustering, scoring, fare discipline, checklist, anti-patterns |
+| `chinese-travel-recommend/prompts/season-factcheck.md` | Per-attraction fact-check prompt used before showing the shortlist |
+| `chinese-travel-recommend/prompts/final-review.md` | Whole-report review prompt used before delivery |
+| `chinese-travel-recommend/assets/report-template/` | Report template, opens with empty data; includes four SVG placeholders |
+| `chinese-travel-recommend/assets/attractions/` | Attraction library: `attractions.jsonl` (163 entries), `curated.jsonl`, field docs |
+| `chinese-travel-recommend/scripts/` | Python toolchain (see below) |
+
+### Toolchain
+
+| Script | Purpose |
+|---|---|
+| `build_attractions.py` | Scrape public rankings → parse → dedupe → tag → enrich intros → JSONL |
+| `attractions.py` | Query the library by province/type/tag/keyword; exclude visited, find alternatives; `--all --format compact` dumps the whole pool |
+| `fetch_rail_fares.py` | 12306 trains and per-class fares, with cookie handling and real departure-station checks |
+| `fetch_images.py` | Bulk Commons download by exact file name; rate limit, retry, md5 dedupe, credits |
+| `fetch_images_search.py` | Multi-source image search (Commons / Commons categories / Openverse / Wikipedia lead image) |
+| `fetch_geo.py` | Name → coordinates (Wikipedia coordinates, Wikidata P625 fallback) |
+| `optimize_images.py` | Downscale/compress images before packaging |
+| `verify_report.py` | Static self-check: files, images, credits, duplicate images, external links, placeholders, price structure |
+| `package_report.py` | Self-check then zip, keeping the top-level folder |
+| `calc_budget.py` | Recompute the budget with the same formula as the page |
+| `lib.py` | Shared helpers (HTTP session, retry, md5, credit cleaning) |
 
 ---
 
-## 手动跑脚本
-
-脚本用 Python 3.11+，依赖写在 PEP 723 头里，`uv` 自动安装，不需要手动 pip。
+## Running scripts manually
 
 ```bash
-cd travel-recommend
+cd chinese-travel-recommend
 
-# 车次票价（超出 15 天预售期会提示「未开售」，不是「无车」）
+# Rail fares (beyond the ~15-day 12306 presale window it reports "not on sale", not "no train")
 uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 黄山北 2026-11-25
 
-# 抓图：清单每行 slug|Commons 文件名|宽度
+# Images: manifest lines are slug|Commons file name|width
 uv run --no-project scripts/fetch_images.py ../travel-report/images manifest.tsv --sleep 4
 
-# 增量补图（保留已有 credits）
-uv run --no-project scripts/fetch_images.py ../travel-report/images more.tsv --keep-credits
+# Top up images without losing existing credits
+uv run --no-project scripts/fetch_images_search.py ../travel-report/images more.tsv --keep-credits
 
-# 自检 → 打包
+# Attraction library
+uv run --no-project scripts/attractions.py --province 浙江 --type 山岳
+uv run --no-project scripts/attractions.py --exclude 丽江,平遥 --province 云南
+uv run --no-project scripts/attractions.py --all --format compact
+
+# Self-check → package
 uv run --no-project scripts/verify_report.py ../travel-report
 uv run --no-project scripts/package_report.py ../travel-report out.zip
 ```
 
-依赖：`uv`（自动选 Python）。不再需要 curl / jq / node / Git Bash；Windows 的 `cmd` 或 PowerShell 也能直接调 `uv`。
-
 ---
 
-## 这份 skill 的取舍
+## Design stances
 
-| 它坚持 | 为什么 |
+| It insists on | Why |
 |---|---|
-| 缺字段就问，不问清不产出 | 用示例数据填出来的方案，订票时全废 |
-| 每个价格带查询时间与来源 | 「大概 500 块」是最没用的一句话 |
-| 先问预算口径，不默认取最差者 | 两个人的距离和收入不同，一个人的上限不该强加给另一个人 |
-| 先过季节门槛 | 夏天推冰雪大世界、雨季推峡谷，攻略写得再好也是错 |
-| 景点级核验开放/入口/停止入场 | 「到了发现关门」「走错门多绕 1 小时」是最高频的踩坑 |
-| 一个群内的城市同省或相邻省 | 跨半个中国拼出来的「群」，车上时间比玩的时间长 |
-| 每个群都给完整方案 | 只给首选写详情，等于替用户做了选择 |
-| 图片越多越好，2 张只是下限 | 凑够 2 张就收手，读起来像目录 |
-| 地图默认内嵌 SVG | Leaflet/OSM 瓦片要联网或几十 MB；高德 key 作为可选增强 |
+| Ask before producing; never fill gaps with samples | A plan built on invented inputs dies at the booking page |
+| Every price carries a query time and source | "About ¥500" is the least useful sentence in travel planning |
+| Ask for the budget mode instead of defaulting to the worst case | Different distances and incomes; one person's cap is not the other's |
+| Season gate before scoring | Recommendations that ignore seasons are wrong no matter how well written |
+| Verify opening hours, gates and last entry per attraction | "It was closed" and "wrong gate, one hour detour" are the most common failures |
+| Clusters stay within one or adjacent provinces | Cross-country "clusters" spend more time in transit than at the destination |
+| A complete plan for every cluster | Detailing only the top pick makes the choice for the user |
+| 4–6 images per attraction (6–10 for landmarks) | Two images read like a catalogue, not a report |
+| Offline SVG map by default | Tile maps need network or tens of MB; AMap stays an opt-in enhancement |
 
 ---
 
-## 已知边界
+## Known limits
 
-- **SVG 地图是示意投影**，不是瓦片底图：能看清「谁在谁东北、几段路怎么连」，看不到街道。要真实底图用 `mapMode: "amap"` + 自己的 key，但需联网，且 `file://` 可能被 key 的域名白名单限制。
-- **12306 预售期约 15 天**：远期价格取同车次近期实价，报告写明参考乘车日，并提示放票后可能上浮。
-- **机票、住宿、部分门票是估算**：标 `estimated` 并给区间，不编造精确数字。
-- **景点开放状态会临时变**：大风封天池、临时闭馆、索道检修都可能发生；报告给的是核对时点的状态，出发前再看一眼官方公告。
-- **单城深度游**不是它的强项：价值在「多个候选群之间做比较」。
+- **The SVG map is a schematic projection**, not tiles: it shows relative positions and how segments connect, not streets. For a real basemap use `mapMode: "amap"` with your own key — it needs network and `file://` may hit the key's referer allowlist.
+- **12306 presale is about 15 days**: for later dates the report quotes a comparable recent fare, labels the reference date, and warns that prices can move once sales open.
+- **Flights, hotels and some tickets are estimates**: marked `estimated` with ranges; no fake precision.
+- **Attraction status changes**: strong winds close the Tianchi, museums close temporarily, cable cars go into maintenance. Status is as-of-check-time; confirm official notices before departure.
+- **Deep single-city travel** is not its strength: the value is comparing several candidate clusters.
 
 ---
 
-## 用之前
-
-报告是决策参考，不是预订承诺。票价、门票、开放时间都会变；下单前以官方渠道为准，尤其节假日。
+Reports are decision support, not a booking guarantee. Fares, tickets and opening hours change; confirm with official channels before paying, especially on holidays.

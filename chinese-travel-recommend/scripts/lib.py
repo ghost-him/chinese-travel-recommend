@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["requests>=2.32"]
 # ///
-"""travel-recommend 脚本共用工具：HTTP、重试、哈希、署名清洗。
+"""chinese-travel-recommend 脚本共用工具：HTTP、重试、哈希、署名清洗。
 
 依赖由 uv 按本文件的 PEP 723 元数据自动安装；不要手动 pip install。
 """

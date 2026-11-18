@@ -1,5 +1,5 @@
 ---
-name: travel-recommend
+name: chinese-travel-recommend
 description: 按用户画像、出行时间、假期长度、同行者所在地推荐目的地，并交付可直接打开的图文 HTML 报告（行程、风土人情、交通票价、费用估算、路线地图）。用于「元旦/春节去哪」「帮我规划几天行程」「两个人从不同城市出发在哪会合」「预算 X 元能去哪」这类请求。
 version: 1.8.3
 license: MIT
@@ -14,12 +14,12 @@ tools:
   - 浏览器（验证渲染）
 ---
 
-# 旅行推荐（travel-recommend）
+# 中文旅行推荐（chinese-travel-recommend）
 
 ## skill 结构
 
 ```
-travel-recommend/
+chinese-travel-recommend/
 ├─ SKILL.md                     # 方法论：输入契约 / 组群 / 行程 / 票价 / 验证
 ├─ assets/report-template/      # 报告模板（index.html + css + js + 占位图）
 │  └─ README.md                 # 模板怎么填
