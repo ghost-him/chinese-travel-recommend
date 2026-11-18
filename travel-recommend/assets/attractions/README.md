@@ -3,6 +3,7 @@
 一个可查询、可复现的中国景点池，用来避免「让模型凭印象临时挑景点」。
 
 - 主库：`attractions.jsonl`，每行一个景点
+- 外部名单：`curated.jsonl`（用户提供的「知乎 55 个地方」「景区百强 100」，提供核心亮点与别名；只补亮点、不覆盖已有介绍）
 - 来源与可用性：`sources.md`（由构建脚本自动生成）
 - 缓存：`.cache/`（原始页面，便于离线重建；不进报告包）
 
@@ -16,6 +17,8 @@
 | `type` | 类型：山岳 / 湖泊 / 瀑布 / 草原 / 梯田 / 海岛 / 峡谷 / 溶洞 / 荒漠 / 冰川 / 石窟 / 园林 / 长城 / 古村镇 / 古建筑 / 寺庙宫观 / 博物馆 / 城市地标 / 红色/纪念 / 综合 |
 | `tags` | 场景标签：秋色 / 冰雪 / 避寒 / 赏花 / 摄影 / 徒步 / 人文 / 亲子 / 自驾 |
 | `intro` | 客观介绍：是什么、在哪、为什么值得看；几十到两百多字，长短取决于来源 |
+| `highlight` | 一句话核心亮点（来自外部名单，介绍缺失时兜底显示） |
+| `highlightSource` | 亮点来源（如「景区百强 100（用户提供）」） |
 | `introSource` | `zh.wikipedia` 表示介绍由维基百科补全（原榜单文章没有） |
 | `sources[]` | 该条目的出处链接（榜单 / 维基条目） |
 | `address` | 详细地址（有则填） |
@@ -36,7 +39,7 @@ uv run --no-project scripts/attractions.py --exclude 丽江,平遥 --province �
 # 用户去过泸沽湖 → 找同省同类型的替代
 uv run --no-project scripts/attractions.py --similar 泸沽湖
 
-# 完全没有目标时：整表入上下文（153 条 ≈ 10.1k 字符），自己横向比
+# 完全没有目标时：整表入上下文（163 条 ≈ 11.0k 字符），自己横向比
 uv run --no-project scripts/attractions.py --all --format compact
 
 # 只想每类抽一个做提示
@@ -54,6 +57,10 @@ uv run --no-project scripts/attractions.py --missing-intro    # 看还缺哪些�
 
 新增来源：在 `build_attractions.py` 的 `SOURCES` 里加一条（`kind` 选 `numbered` / `province` / `table`），
 先确认页面能直出正文；被反爬拦下的站点（知乎、百度百科、今日头条）不要加。
+
+新增名单条目：直接编辑 `curated.jsonl`，一行一条
+`{"name":"...","province":"...","highlight":"一句话亮点","alias":"名单里的其它写法","type":"可选，缺省按规则推"}`，
+重建后自动合并（已存在的只补亮点与别名，不覆盖介绍）。
 
 ## 版权与准确性
 

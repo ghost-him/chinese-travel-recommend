@@ -34,6 +34,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "assets" / "attractions"
+CURATED = OUT_DIR / "curated.jsonl"
 CACHE = OUT_DIR / ".cache"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/140.0 Safari/537.36"}
@@ -354,6 +355,13 @@ def wiki_title_ok(name: str, title: str) -> bool:
     admin = re.search(r"(县|镇|乡|街道|社区|区)$", title)
     if admin and not re.search(re.escape(admin.group(1)) + "$", name):
         return False
+    # 历史政权条目：大理曾配到「大理国」（937—1094 年的政权），不是古城
+    if re.search(r"(国|王朝|帝国)$", title) and not re.search(r"(国|王朝|帝国)$", name):
+        return False
+    # 古镇/古城配到行政镇或市政府条目：南浔古镇 ← 南浔镇、阆中古城 ← 阆中市
+    if name.endswith(("古镇", "古城", "古村")) and title.endswith(("镇", "市", "县", "区")) \
+            and not title.endswith(("古镇", "古城", "古村")):
+        return False
     if n == t:
         return True
     short, long = sorted((n, t), key=len)
@@ -514,6 +522,52 @@ def norm_key(name: str) -> str:
     return re.sub(r"[·\s\-—－()（）]|景区|风景区|风景名胜区|旅游区|旅游度假区|古镇|古城|博物馆|博物院", "", name)
 
 
+def apply_curated(records: list[dict]) -> tuple[int, int]:
+    """把用户提供的外部名单（curated.jsonl）并进来。
+
+    规则：名单里的名字按 name 或 alias 精确匹配（不做模糊匹配，避免「北京」吃掉「北京环球影城」）；
+    命中就补 highlight（核心亮点）并登记 alias，没命中就新增一条（介绍留空，等 --enrich 补）。
+    """
+    if not CURATED.is_file():
+        return 0, 0
+    index: dict[str, dict] = {}
+    for record in records:
+        for name in [record["name"]] + record["aliases"]:
+            index.setdefault(norm_key(name), record)
+    added = filled = 0
+    for line in CURATED.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        item = json.loads(line)
+        record = index.get(norm_key(item["name"]))
+        if record is None:
+            record = {
+                "name": item["name"], "aliases": [], "province": item.get("province", ""),
+                "city": "", "type": item.get("type") or type_of(item["name"]),
+                "tags": tags_of(item["name"], item.get("highlight", "")),
+                "intro": "", "highlight": item.get("highlight", ""),
+                "highlightSource": item.get("source", ""),
+                "sources": [{"title": item.get("source", "外部名单"), "url": ""}],
+            }
+            records.append(record)
+            index[norm_key(record["name"])] = record
+            added += 1
+        else:
+            if item.get("highlight") and not record.get("highlight"):
+                record["highlight"] = item["highlight"]
+                record["highlightSource"] = item.get("source", "")
+                filled += 1
+            if item.get("province") and not record.get("province"):
+                record["province"] = item["province"]
+        # 名单里的写法与库内规范名不同（如「黄山风景区」对「黄山」），一律登记成别名
+        for alias in {item.get("alias"), item["name"]}:
+            if alias and alias != record["name"] and alias not in record["aliases"]:
+                record["aliases"].append(alias)
+                index.setdefault(norm_key(alias), record)
+    return added, filled
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建景点知识库")
     parser.add_argument("--offline", action="store_true", help="只用本地缓存")
@@ -612,6 +666,11 @@ def main() -> int:
     for record in records:
         record.pop("_key", None)
     records.sort(key=lambda r: (r["province"] or "zz", r["type"], r["name"]))
+
+    added, filled = apply_curated(records)
+    if added or filled:
+        print(f"  外部名单：新增 {added} 条、补核心亮点 {filled} 条", file=sys.stderr)
+        records.sort(key=lambda r: (r["province"] or "zz", r["type"], r["name"]))
 
     merged = 0
     for record in records:

@@ -59,6 +59,11 @@ def matched(record: dict, visited: list[str]) -> bool:
     return False
 
 
+def text_of(record: dict, fallback: str) -> str:
+    """有介绍用介绍，没有就用外部名单的核心亮点。"""
+    return (record.get("intro") or record.get("highlight") or fallback)
+
+
 def render(rows: list[dict], fmt: str, limit: int | None, intro_chars: int = 60) -> None:
     if limit:
         rows = rows[:limit]
@@ -66,25 +71,25 @@ def render(rows: list[dict], fmt: str, limit: int | None, intro_chars: int = 60)
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
     if fmt == "compact":
-        print(f"# 名称｜省份｜类型｜标签｜介绍（前 {intro_chars} 字）")
+        print(f"# 名称｜省份｜类型｜标签｜介绍/亮点（前 {intro_chars} 字）")
         for r in rows:
-            intro = (r.get("intro") or "（待补）").replace("|", "／").replace("\n", "")
+            text = text_of(r, "（待补）").replace("|", "／").replace("\n", "")
             print(f"{r['name']}｜{r.get('province') or '—'}｜{r.get('type') or '—'}｜"
-                  f"{'/'.join(r.get('tags') or []) or '-'}｜{intro[:intro_chars]}")
+                  f"{'/'.join(r.get('tags') or []) or '-'}｜{text[:intro_chars]}")
         return
     if fmt == "markdown":
         print("| 景点 | 省份 | 类型 | 标签 | 介绍 |")
         print("|---|---|---|---|---|")
         for r in rows:
-            intro = (r.get("intro") or "（待补）").replace("|", "／")
+            text = text_of(r, "（待补）").replace("|", "／")
             print(f"| {r['name']} | {r.get('province') or '—'} | {r.get('type') or '—'} | "
-                  f"{'、'.join(r.get('tags') or []) or '—'} | {intro[:80]} |")
+                  f"{'、'.join(r.get('tags') or []) or '—'} | {text[:80]} |")
         return
     for r in rows:
-        intro = (r.get("intro") or "（待补介绍）")
+        text = text_of(r, "（待补介绍）")
         print(f"{r['name']}｜{r.get('province') or '—'}·{r.get('type') or '—'}"
               f"{('·' + '、'.join(r['tags'])) if r.get('tags') else ''}")
-        print(f"  {intro[:120]}")
+        print(f"  {text[:120]}")
         if r.get("address"):
             print(f"  地址：{r['address']}")
 
