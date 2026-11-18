@@ -13,9 +13,9 @@
 | `name` | 景点名（去掉了「景区/风景区/古镇」等后缀与标题里的省份前缀） |
 | `aliases` | 别名（如「周庄古镇」→ 周庄），用于「用户说去过」时的匹配 |
 | `province` / `city` | 省份（34 个省级单位）、城市；由地址或标题前缀推断 |
-| `type` | 类型：山岳 / 湖泊 / 瀑布 / 草原 / 梯田 / 海岛 / 峡谷 / 溶洞 / 荒漠 / 冰川 / 石窟 / 园林 / 长城 / 古村镇 / 古建筑 / 寺庙宫观 / 博物馆 / 城市地标 / 红色纪念 / 综合 |
+| `type` | 类型：山岳 / 湖泊 / 瀑布 / 草原 / 梯田 / 海岛 / 峡谷 / 溶洞 / 荒漠 / 冰川 / 石窟 / 园林 / 长城 / 古村镇 / 古建筑 / 寺庙宫观 / 博物馆 / 城市地标 / 红色/纪念 / 综合 |
 | `tags` | 场景标签：秋色 / 冰雪 / 避寒 / 赏花 / 摄影 / 徒步 / 人文 / 亲子 / 自驾 |
-| `intro` | 60–150 字的客观介绍：是什么、在哪、为什么值得看 |
+| `intro` | 客观介绍：是什么、在哪、为什么值得看；几十到两百多字，长短取决于来源 |
 | `introSource` | `zh.wikipedia` 表示介绍由维基百科补全（原榜单文章没有） |
 | `sources[]` | 该条目的出处链接（榜单 / 维基条目） |
 | `address` | 详细地址（有则填） |
@@ -28,23 +28,27 @@ uv run --no-project scripts/attractions.py
 
 # 按省份 / 类型 / 标签筛选
 uv run --no-project scripts/attractions.py --province 浙江 --type 山岳
-uv run --no-project scripts/attractions.py --tag 冰雪 --tag 摄影
+uv run --no-project scripts/attractions.py --tag 摄影 --tag 秋色
 
 # 用户说「去过丽江和平遥」→ 直接排除
 uv run --no-project scripts/attractions.py --exclude 丽江,平遥 --province 云南
 
-# 用户心仪长白山但怕冷 → 找同省同类型的替代
-uv run --no-project scripts/attractions.py --similar 长白山
+# 用户去过泸沽湖 → 找同省同类型的替代
+uv run --no-project scripts/attractions.py --similar 泸沽湖
 
-# 完全没有目标时，每个类型抽一个
+# 完全没有目标时：整表入上下文（154 行 ≈ 8.9k 字符），自己横向比
+uv run --no-project scripts/attractions.py --all --format compact
+
+# 只想每类抽一个做提示
 uv run --no-project scripts/attractions.py --suggest 8 --seed 7
 ```
 
 ## 怎么更新
 
 ```bash
-uv run --no-project scripts/build_attractions.py            # 用缓存重建
-uv run --no-project scripts/build_attractions.py --enrich    # 允许联网，用维基补缺失介绍
+uv run --no-project scripts/build_attractions.py            # 优先用 .cache，缺了才联网
+uv run --no-project scripts/build_attractions.py --offline   # 只读缓存，绝不联网
+uv run --no-project scripts/build_attractions.py --enrich    # 额外用维基补缺失介绍（有标题校验，错配宁可留空）
 uv run --no-project scripts/attractions.py --missing-intro    # 看还缺哪些介绍
 ```
 

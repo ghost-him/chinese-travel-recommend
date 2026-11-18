@@ -1,7 +1,7 @@
 ---
 name: travel-recommend
 description: 按用户画像、出行时间、假期长度、同行者所在地推荐目的地，并交付可直接打开的图文 HTML 报告（行程、风土人情、交通票价、费用估算、路线地图）。用于「元旦/春节去哪」「帮我规划几天行程」「两个人从不同城市出发在哪会合」「预算 X 元能去哪」这类请求。
-version: 1.8.0
+version: 1.8.1
 license: MIT
 triggers:
   - 用户给出日期/假期长度，询问去哪、怎么排、要花多少钱
@@ -270,22 +270,33 @@ over_i(d)   = cost_i(d) - cap_i(d)
 
 ### 2.4 景点库：先查库，再联网，再谈推荐
 
-`assets/attractions/attractions.jsonl` 是一个可查询的中国景点池（160 条起，字段见该目录 README）：
-名称 / 别名 / 省份 / 城市 / 类型 / 标签 / 60–150 字介绍 / 来源链接。
+`assets/attractions/attractions.jsonl` 是一个可查询的中国景点池（154 条起，字段见该目录 README）：
+名称 / 别名 / 省份 / 城市 / 类型 / 标签 / 介绍（几十到两百多字，长短取决于来源）/ 来源链接。
 **候选景点不该由模型凭印象临时挑**——先查库，库里有就直接用；库里没有才联网补，补完写回库。
+
+两种用法，按场景选：
+
+| 场景 | 命令 | 成本 |
+|---|---|---|
+| 没有明确目标，要做横向比较 | `--all --format compact` 全量入上下文 | 155 行 ≈ 8.9k 字符（介绍 60 字）/ 11.8k（120 字），一次读完不算负担 |
+| 有目标、要排除、要校验 | 按省/类型/标签/关键词过滤 | 只输出命中的几条 |
 
 ```bash
 uv run --no-project scripts/attractions.py                              # 概览：多少条、哪些省份/类型/标签
+uv run --no-project scripts/attractions.py --all --format compact        # 全量精简表，直接贴进上下文
+uv run --no-project scripts/attractions.py --all --format compact --intro-chars 120
 uv run --no-project scripts/attractions.py --province 浙江 --type 山岳
-uv run --no-project scripts/attractions.py --tag 冰雪 --tag 摄影
+uv run --no-project scripts/attractions.py --tag 摄影 --tag 秋色          # 多标签是「同时满足」
 uv run --no-project scripts/attractions.py --exclude 丽江,平遥            # 用户去过 → 直接排除
-uv run --no-project scripts/attractions.py --similar 长白山               # 同省同类型替代
-uv run --no-project scripts/attractions.py --suggest 8 --seed 7          # 没有目标时每类抽一个
+uv run --no-project scripts/attractions.py --similar 泸沽湖               # 同省同类型替代（没有则逐级回退并提示）
+uv run --no-project scripts/attractions.py --suggest 8 --seed 7          # 每类抽 1 个，取前 N 条
 uv run --no-project scripts/attractions.py --missing-intro               # 还缺介绍的条目
 ```
 
 规则：
 
+0. **先选模式**：用户没给方向、或要「这个季节哪里值得去」这类横向判断 → 全量入上下文，由你自己比对；
+   用户点名、说过去过、或要求核对某一类 → 走过滤，别把 154 行都塞进去。
 1. **第 0 问之后、组群之前先查库**：用户点名的地名用 `--name` 查（含别名），能查到就带着它的类型与卖点进入组群；
 2. **用户说「去过 X / 不想去 X」**：`--exclude X` 排除，再用 `--similar X` 找同省同类型的替代，按 2.6 的规则**整群替换**；
 3. **库里没有的景点**：`build_attractions.py --enrich` 或人工联网补介绍，写回库并注明 `sources[]`；不要用模型记忆硬写；
@@ -748,6 +759,17 @@ travel-report/
 - **新脚本**：`fetch_images_search.py`（多源抓图）、`fetch_geo.py`（维基 + Wikidata 坐标）、`optimize_images.py`（74MB → 20MB 级压缩）。
 - **修脚本**：`fetch_rail_fares.py` 区分「超预售期返回 HTML」与「无车」；12306 不再按 from/to 过滤时，零匹配给出终到站分布。
 - **新增「已固化的坑」表**：Windows 下 `/c/...` 被当 `C:\c\...`、`uv run -c` 不合法、tab 选择器要用 `.tab-name`、headless WebKit 无 TLS 不能验在线地图等。
+
+### 1.8.1（2026-11-18）
+
+- **新增全量快照模式**：`attractions.py --all --format compact`，154 行 ≈ 8.9k 字符（介绍 60 字）。没有明确目标、要做横向比较时整表入上下文，比逐次过滤更省事；有目标/要排除时仍走过滤。SKILL 2.4 补「先选模式」一条。
+- **修介绍错配**：维基补介绍原来只取搜索首条，`阿尔山柴河` 拿到了「柴河（辽宁那条河）」、`房山世界地质公园` 拿到了「石林风景名胜区」、`库车大峡谷` 拿到了维基列表页。改为标题三档校验（核心名相同 / 包含且占比≥0.5 或长度≥3 / 相似度≥0.75），错配宁可留空。
+- **修省份误判**：`province_of` 原来双向子串匹配，`华山` 被 `九华山` 判成安徽；改为精确匹配优先、只允许「关键字在名称里」。
+- **修名称截断**：`嵩山国家`、`亚龙湾国家`、`大连金石滩国家` 补剥 `国家/国家级` 后缀；`戈阳龟峰` 纠正为 `弋阳龟峰`。
+- **合并重复条目**：长城/万里长城、昆明石林/云南石林、陕晋壶口瀑布/黄河壶口瀑布、苍山洱海/洱海、神农架/神农架国家级自然保护区、承德避暑山庄/及周围寺庙，别名保留可检索；160 → 154。
+- **补 city 字段**：原来恒为空，现从地址提取地级市（97/154 有值），README 的字段说明与实际一致。
+- **修 CLI 报告**：`--limit` 后不再把「匹配 N 条」写成过滤前总数；`--suggest` 帮助文案与实际行为（每类抽 1 个、取前 N）一致；零命中时提示筛选是精确匹配。
+- **修文档可执行性**：`--tag 冰雪 --tag 摄影`（交集为 0）换成 `--tag 摄影 --tag 秋色`；`--similar 长白山`（吉林无同类、会回退到全国）换成 `--similar 泸沽湖`。
 
 ### 1.8.0（2026-11-18）
 

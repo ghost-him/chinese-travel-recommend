@@ -25,7 +25,10 @@ import json
 import re
 import sys
 import time
+from datetime import date
+from difflib import SequenceMatcher
 from pathlib import Path
+from urllib.parse import unquote
 
 import requests
 
@@ -123,10 +126,11 @@ TAG_RULES = {
 def fetch(url: str, cache_name: str, offline: bool) -> str:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / f"{cache_name}.html"
-    if offline and path.is_file():
+    if path.is_file() and (offline or path.stat().st_size > 5000):
         return path.read_text(encoding="utf-8", errors="replace")
-    if path.is_file() and path.stat().st_size > 5000:
-        return path.read_text(encoding="utf-8", errors="replace")
+    if offline:
+        print(f"  跳过 {cache_name}：--offline 且本地无缓存", file=sys.stderr)
+        return ""
     try:
         response = requests.get(url, headers=UA, timeout=30)
         response.raise_for_status()
@@ -148,12 +152,42 @@ def html_to_lines(html: str) -> list[str]:
     return [line for line in lines if line]
 
 
+# 来源自带的错字；右侧为正确写法
+NAME_FIX = {"戈阳龟峰": "弋阳龟峰"}
+
+# 同一景区/同一事物的重复条目：左侧并入右侧（左侧进 aliases，不丢检索能力）
+DUP_TARGET = {
+    "承德避暑山庄及周围寺庙": "承德避暑山庄",
+    "昆明石林": "云南石林",
+    "陕晋壶口瀑布": "黄河壶口瀑布",
+    "长城": "万里长城",
+    "神农架国家级自然保护区": "神农架",
+    "苍山洱海": "洱海",
+}
+
+# 关键词规则判错的类型，用人工纠偏覆盖（只覆盖明确的错判）
+TYPE_OVERRIDE = {
+    "洪崖洞": "城市地标",       # 规则命中「洞」→ 溶洞
+    "东方明珠塔": "城市地标",   # 规则命中「塔」→ 古建筑
+    "夫子庙-秦淮风光带": "古村镇",
+    "承德避暑山庄": "园林",     # 规则命中「山」→ 山岳
+}
+
+
+def canonical_name(raw: str) -> tuple[str, str]:
+    """清洗 + 纠错 + 合并，返回 (规范名, 需要并入 aliases 的原名)。"""
+    clean = clean_name(raw)
+    fixed = NAME_FIX.get(clean, clean)
+    name = DUP_TARGET.get(fixed, fixed)
+    return name, (fixed if fixed != name else "")
+
+
 def clean_name(raw: str) -> str:
     # 去掉【外号】、括号补充与编号；「长白山·天池」合并成一个名字
     name = re.sub(r"【[^】]*】|\[[^\]]*\]|（[^）]*）|\([^)]*\)", " ", raw)
     name = re.sub(r"^(中国)?\d+\s*[、.．]\s*", "", name)
-    for _ in range(3):  # 「泰宁风景旅游区」这类要连剥两层后缀
-        stripped = re.sub(r"(风景名胜区|旅游景区|旅游度假区|风景区|景区|旅游区|风景)$", "", name.strip())
+    for _ in range(4):  # 「亚龙湾国家旅游度假区」这类要连剥两层后缀
+        stripped = re.sub(r"(风景名胜区|旅游景区|旅游度假区|风景区|景区|旅游区|风景|国家级|国家)$", "", name.strip())
         if stripped == name:
             break
         name = stripped
@@ -224,6 +258,49 @@ def parse_table_html(html: str) -> list[dict]:
     return items
 
 
+def _norm_title(text: str) -> str:
+    return re.sub(r"[\s_\-—－()（）]|维基百科|Wikipedia", "", text)
+
+
+GENERIC_TAIL = re.compile(
+    r"(国家地质公园|世界地质公园|地质公园|国家森林公园|森林公园|国家自然保护区|自然保护区"
+    r"|旅游度假区|度假区|旅游景区|风景区|景区|国家级|国家|乐园|公园|古镇|古城|瀑布|大峡谷|峡谷)$"
+)
+
+
+def _core(text: str) -> str:
+    text = _norm_title(text)
+    for _ in range(2):
+        stripped = GENERIC_TAIL.sub("", text)
+        if stripped == text:
+            break
+        text = stripped
+    return text
+
+
+def wiki_title_ok(name: str, title: str) -> bool:
+    """只接受与景点同一实体的页面标题。
+
+    三种放行：核心名相同（天坛公园/天坛）、一方包含另一方且占比≥0.5（南岳衡山/衡山）、
+    相似度≥0.75（德天跨国瀑布/德天瀑布）。像「阿尔山柴河」拿到「柴河（辽宁河流）」
+    占比 0.4、相似度 0.57，会被挡住。
+    """
+    n, t = _core(name), _core(title)
+    if not n or not t:
+        return False
+    if n == t:
+        return True
+    short, long = sorted((n, t), key=len)
+    if short in long and (len(short) / len(long) >= 0.5 or len(short) >= 3):
+        return True
+    return SequenceMatcher(None, n, t).ratio() >= 0.75
+
+
+def wiki_title_from_url(url: str) -> str:
+    tail = url.rsplit("/", 1)[-1]
+    return unquote(tail).replace("_", " ")
+
+
 def wiki_intro(name: str) -> tuple[str, str, str] | None:
     """维基补介绍：先按标题精确查，对不上再走搜索。返回 (介绍, 标题, 链接)。"""
     queries = [
@@ -240,8 +317,8 @@ def wiki_intro(name: str) -> tuple[str, str, str] | None:
             continue
         for page in ((payload.get("query") or {}).get("pages") or {}).values():
             extract = re.sub(r"\s+", "", (page.get("extract") or "").strip())
-            if len(extract) > 40:
-                title = page.get("title", name)
+            title = page.get("title", name)
+            if len(extract) > 40 and wiki_title_ok(name, title):
                 return extract, title, "https://zh.wikipedia.org/wiki/" + title.replace(" ", "_")
     return None
 
@@ -299,8 +376,10 @@ NAME_PROVINCE_KEYS = sorted(NAME_PROVINCE, key=len, reverse=True)
 
 
 def province_of(name: str, address: str = "", hinted: str = "") -> str:
+    if name in NAME_PROVINCE:  # 先精确命中，避免「华山」被「九华山」吞掉
+        return NAME_PROVINCE[name]
     for key in NAME_PROVINCE_KEYS:
-        if key in name or name in key:
+        if len(key) >= 2 and key in name:
             return NAME_PROVINCE[key]
     if hinted:
         for prov in PROVINCES:
@@ -316,6 +395,18 @@ def province_of(name: str, address: str = "", hinted: str = "") -> str:
         if name.startswith(prov):
             return prov
     return ""
+
+
+def city_of(address: str, province: str) -> str:
+    """从地址里取地级市（有地址才有值；没有就留空，不猜）。"""
+    if not address:
+        return ""
+    rest = address
+    if province and rest.startswith(province):
+        rest = rest[len(province):]
+    rest = re.sub(r"^(省|市|自治区|特别行政区|壮族自治区|回族自治区|维吾尔自治区)+", "", rest)
+    match = re.match(r"([\u4e00-\u9fa5]{2,10}?(?:市|自治州|州|盟|地区|县|区))", rest)
+    return match.group(1) if match else ""
 
 
 def type_of(name: str) -> str:
@@ -367,6 +458,7 @@ def main() -> int:
                 continue
             old = json.loads(line)
             previous[norm_key(old["name"])] = old
+            previous.setdefault(norm_key(canonical_name(old["name"])[0]), old)
 
     collected: dict[str, dict] = {}
     used_sources: list[dict] = []
@@ -384,18 +476,22 @@ def main() -> int:
         kept = 0
         for item in parsed:
             prov_hint, raw_name = split_province(item["raw"])
-            name = clean_name(raw_name)
+            name, alias_name = canonical_name(raw_name)
             if not name or len(name) < 2:
                 continue
             key = norm_key(name)
             body = "".join(item["body"]).strip()
             province = province_of(name, item.get("address", ""), prov_hint or item.get("province", ""))
+            city = city_of(item.get("address", ""), province)
             record = collected.setdefault(key, {
-                "name": name, "aliases": [], "province": province, "city": "",
-                "type": type_of(name), "tags": tags_of(name, body),
-                "intro": "", "subtitle": item.get("subtitle", ""),
-                "sources": [],
+                "name": name, "aliases": [], "province": province, "city": city,
+                "type": TYPE_OVERRIDE.get(name) or type_of(name), "tags": tags_of(name, body),
+                "intro": "", "sources": [],
             })
+            if alias_name and alias_name != name and alias_name not in record["aliases"]:
+                record["aliases"].append(alias_name)
+            if city and not record["city"]:
+                record["city"] = city
             if body and len(body) > len(record["intro"]):
                 record["intro"] = body
             if province and not record["province"]:
@@ -448,13 +544,20 @@ def main() -> int:
         if len(record["intro"]) >= 20:
             continue
         old = previous.get(norm_key(record["name"]))
-        if old and old.get("introSource") == "zh.wikipedia" and len(old.get("intro") or "") >= 20:
-            record["intro"] = old["intro"]
-            record["introSource"] = "zh.wikipedia"
-            for src in (old.get("sources") or [])[:2]:
-                if src not in record["sources"]:
-                    record["sources"].append(src)
-            merged += 1
+        if not (old and old.get("introSource") == "zh.wikipedia" and len(old.get("intro") or "") >= 20):
+            continue
+        # 上一版可能补错了页面（如「阿尔山柴河」拿到「柴河」），沿用前先核对标题
+        wiki_title = next((wiki_title_from_url(s["url"]) for s in old.get("sources") or []
+                           if "wikipedia.org" in s["url"]), "")
+        if wiki_title and not wiki_title_ok(record["name"], wiki_title):
+            print(f"  丢弃错配的维基介绍：{record['name']} ← {wiki_title}", file=sys.stderr)
+            continue
+        record["intro"] = clean_intro(old["intro"])
+        record["introSource"] = "zh.wikipedia"
+        for src in (old.get("sources") or [])[:2]:
+            if src not in record["sources"]:
+                record["sources"].append(src)
+        merged += 1
     if merged:
         print(f"  沿用上一版维基介绍 {merged} 条", file=sys.stderr)
 
@@ -466,7 +569,7 @@ def main() -> int:
             found = wiki_intro(record["name"])
             if found:
                 intro, title, url = found
-                record["intro"] = intro[:300]
+                record["intro"] = clean_intro(intro)
                 record["introSource"] = "zh.wikipedia"
                 record["sources"].append({"title": f"维基百科 · {title}", "url": url})
                 filled += 1
@@ -484,7 +587,7 @@ def main() -> int:
           file=sys.stderr)
     (OUT_DIR / "sources.md").write_text(
         "# 景点库来源\n\n"
-        f"生成时间：2026-11-18　记录数：{len(records)}　有介绍：{with_intro}\n\n"
+        f"生成时间：{date.today().isoformat()}　记录数：{len(records)}　有介绍：{with_intro}\n\n"
         "| 来源 | 链接 | 解析条数 |\n|---|---|---|\n" +
         "".join(f"| {s['title']} | {s['url']} | {s.get('parsed', '—')} |\n" for s in used_sources) +
         "\n已实测**不可用**，不要重试：知乎专栏（403）、百度百科（反爬挑战页）、今日头条（正文需 JS）。\n"

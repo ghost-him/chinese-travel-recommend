@@ -11,7 +11,7 @@
 用法：
   uv run --no-project scripts/attractions.py                          # 统计概览
   uv run --no-project scripts/attractions.py --province 浙江 --type 山岳
-  uv run --no-project scripts/attractions.py --tag 世界遗产 --tag 人文
+  uv run --no-project scripts/attractions.py --tag 摄影 --tag 秋色
   uv run --no-project scripts/attractions.py --keyword 湖 --limit 10
   uv run --no-project scripts/attractions.py --name 喀纳斯
   uv run --no-project scripts/attractions.py --exclude 丽江,平遥 --province 云南
@@ -46,7 +46,7 @@ def load() -> list[dict]:
 
 
 def names_of(record: dict) -> list[str]:
-    return [record.get("name", "")] + list(record.get("aliases") or [])
+    return [n for n in [record.get("name", "")] + list(record.get("aliases") or []) if n and n.strip()]
 
 
 def matched(record: dict, visited: list[str]) -> bool:
@@ -59,11 +59,18 @@ def matched(record: dict, visited: list[str]) -> bool:
     return False
 
 
-def render(rows: list[dict], fmt: str, limit: int | None) -> None:
+def render(rows: list[dict], fmt: str, limit: int | None, intro_chars: int = 60) -> None:
     if limit:
         rows = rows[:limit]
     if fmt == "json":
         print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+    if fmt == "compact":
+        print(f"# 名称｜省份｜类型｜标签｜介绍（前 {intro_chars} 字）")
+        for r in rows:
+            intro = (r.get("intro") or "（待补）").replace("|", "／").replace("\n", "")
+            print(f"{r['name']}｜{r.get('province') or '—'}｜{r.get('type') or '—'}｜"
+                  f"{'/'.join(r.get('tags') or []) or '-'}｜{intro[:intro_chars]}")
         return
     if fmt == "markdown":
         print("| 景点 | 省份 | 类型 | 标签 | 介绍 |")
@@ -91,17 +98,19 @@ def main() -> int:
     parser.add_argument("--name", help="按名称精确/包含匹配")
     parser.add_argument("--exclude", default="", help="去过的地方，逗号分隔，直接排除")
     parser.add_argument("--similar", help="给它找同省同类型的替代（自动排除它自己）")
-    parser.add_argument("--suggest", type=int, help="每种类型挑 N 个，用于没有明确目标的场景")
+    parser.add_argument("--suggest", type=int, help="每类随机抽 1 个，最终取前 N 条（按 --seed 可复现）")
     parser.add_argument("--missing-intro", action="store_true", help="列出还缺介绍的条目")
     parser.add_argument("--dup", action="store_true", help="检查疑似重复条目")
-    parser.add_argument("--format", choices=["table", "json", "markdown"], default="table")
+    parser.add_argument("--all", action="store_true", help="输出全部条目（配 --format compact 就是上下文快照）")
+    parser.add_argument("--intro-chars", type=int, default=60, help="compact 格式每条保留的介绍字数（默认 60）")
+    parser.add_argument("--format", choices=["table", "compact", "json", "markdown"], default="table")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--seed", type=int, help="--suggest 的随机种子，便于复现")
     args = parser.parse_args()
 
     rows = load()
-    if not any([args.province, args.type, args.tag, args.keyword, args.name, args.exclude,
-                args.similar, args.suggest, args.missing_intro, args.dup]):
+    if not args.all and not any([args.province, args.type, args.tag, args.keyword, args.name, args.exclude,
+                                 args.similar, args.suggest, args.missing_intro, args.dup]):
         provinces = sorted({r["province"] for r in rows if r.get("province")})
         types = sorted({r["type"] for r in rows if r.get("type")})
         with_intro = sum(1 for r in rows if len(r.get("intro") or "") >= 20)
@@ -122,7 +131,8 @@ def main() -> int:
     if args.dup:
         seen: dict[str, list[str]] = {}
         for r in rows:
-            key = re.sub(r"[·\s\-—－()（）]|景区|风景区|古镇|古城", "", r["name"])
+            key = re.sub(r"[·\s\-—－()（）]|景区|风景区|风景名胜区|旅游区|旅游度假区|古镇|古城|博物馆|博物院|国家级|国家",
+                         "", r["name"])
             seen.setdefault(key, []).append(r["name"])
         dups = {k: v for k, v in seen.items() if len(v) > 1}
         for key, names in dups.items():
@@ -176,8 +186,13 @@ def main() -> int:
         rng.shuffle(picked)
         selected = picked[:args.suggest]
 
-    render(selected, args.format, args.limit)
-    print(f"\n匹配 {len(selected)} 条" + (f"（已排除：{'、'.join(visited)}）" if visited else ""),
+    shown = selected[:args.limit] if args.limit else selected
+    render(shown, args.format, None, args.intro_chars)
+    more = f"，共 {len(selected)} 条" if args.limit and len(selected) > len(shown) else ""
+    if not shown and (args.province or args.type or args.tag):
+        print("（无匹配：--province/--type/--tag 都是精确匹配，先不带筛选跑一次可看可选值）",
+              file=sys.stderr)
+    print(f"\n匹配 {len(shown)} 条{more}" + (f"（已排除：{'、'.join(visited)}）" if visited else ""),
           file=sys.stderr)
     return 0
 
