@@ -35,6 +35,23 @@ def ensure_date(value: str) -> str:
     return value
 
 
+def query(client: Client, endpoint: str, params: dict[str, str]) -> dict | None:
+    """查 leftTicket。返回 None 表示对方回的是 HTML 页（超预售期/风控），不是「无车」。"""
+    response = client.session.get(
+        f"{BASE}/{endpoint}",
+        params=params,
+        headers={"Accept": "application/json, text/javascript, */*", "Referer": REFERER},
+        timeout=client.timeout,
+    )
+    response.raise_for_status()
+    if "json" not in (response.headers.get("content-type") or "").lower():
+        return None
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
 def station_table(client: Client) -> dict[str, str]:
     raw = client.get(STATIONS_URL).decode("utf-8-sig", errors="replace")
     table: dict[str, str] = {}
@@ -70,32 +87,37 @@ def main() -> int:
     from_code = code_of(table, args.from_name)
     to_code = code_of(table, args.to_name)
 
-    query = f"{BASE}/leftTicket/query"
-    probe = client.get_json(query, {
+    params = {
         "leftTicketDTO.train_date": travel_date,
         "leftTicketDTO.from_station": from_code,
         "leftTicketDTO.to_station": to_code,
         "purpose_codes": "ADULT",
-    })
-    endpoint = (probe or {}).get("c_url") or "leftTicket/queryG"
-    payload = client.get_json(f"{BASE}/{endpoint}", {
-        "leftTicketDTO.train_date": travel_date,
-        "leftTicketDTO.from_station": from_code,
-        "leftTicketDTO.to_station": to_code,
-        "purpose_codes": "ADULT",
-    })
+    }
+    probe = query(client, "leftTicket/query", params)
+    if probe is None:
+        info(f"# {args.from_name} -> {args.to_name} {travel_date}：12306 返回的是 HTML 页而不是 JSON。")
+        info("# 这通常意味着超出 15 天预售期（尚未开售）或触发风控，**不是「无车」**。")
+        info("# 处理方式：开售后再查；本次报价改用 estimated 区间并注明未开售。")
+        return 3
+    endpoint = probe.get("c_url") or "leftTicket/queryG"
+    payload = query(client, endpoint, params) or probe
     rows = ((payload or {}).get("data") or {}).get("result") or []
     if not rows:
         info(f"# {args.from_name} -> {args.to_name} {travel_date}：无可售车次。")
-        info("# 常见原因：超出 15 天预售期（尚未开售）、站名写法不符、或当日无直达。")
+        info("# 常见原因：当日无直达、站名写法不符，或该 OD 暂无车次。")
         return 3
 
     reverse = {value: key for key, value in table.items()}
     print("车次\t出发站\t时刻\t历时\t二等座\t一等座\t商务座\t无座")
     emitted = 0
+    seat_skipped = 0
+    dest_seen: dict[str, int] = {}
     for row in rows:
         fields = row.split("|")
-        if len(fields) < 36 or fields[7] != to_code:
+        if len(fields) < 36:
+            continue
+        dest_seen[fields[7]] = dest_seen.get(fields[7], 0) + 1
+        if fields[7] != to_code:
             continue
         train = fields[3]
         from_tele = fields[6]
@@ -120,9 +142,8 @@ def main() -> int:
             return str(value) if value not in (None, "") else "—"
 
         second, first, business, standing = pick("O"), pick("M"), pick("A9"), pick("WZ")
-        if args.seat == "O" and second == "—":
-            continue
-        if args.seat == "M" and first == "—":
+        if (args.seat == "O" and second == "—") or (args.seat == "M" and first == "—"):
+            seat_skipped += 1
             continue
         print("\t".join([
             train,
@@ -138,7 +159,19 @@ def main() -> int:
         time.sleep(0.3)
 
     if emitted == 0:
-        info(f"# {args.from_name} -> {args.to_name} {travel_date}：没有匹配席别的车次。")
+        if seat_skipped:
+            info(f"# {args.from_name} -> {args.to_name} {travel_date}："
+                 f"有 {seat_skipped} 班终到本站，但该席别无票。")
+            return 3
+        near = "、".join(
+            f"{reverse.get(code, code)}({code}) {count} 班"
+            for code, count in sorted(dest_seen.items(), key=lambda kv: -kv[1])[:5]
+        )
+        info(f"# {args.from_name} -> {args.to_name} {travel_date}："
+             f"没有终到「{args.to_name}」的直达车次。")
+        info(f"# 12306 返回 {len(rows)} 班，终到站分布：{near or '—'}")
+        info("# 注意：12306 不按 from/to 参数过滤，返回的是整片区域车次；"
+             "换邻近大站再查，或改用飞机。")
         return 3
     info(f"# 数据源：12306 leftTicket/query + queryTicketPrice｜"
          f"查询时间：{dt.datetime.now():%Y-%m-%d %H:%M}｜乘车日：{travel_date}")

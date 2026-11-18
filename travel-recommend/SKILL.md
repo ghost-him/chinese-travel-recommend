@@ -1,7 +1,7 @@
 ---
 name: travel-recommend
 description: 按用户画像、出行时间、假期长度、同行者所在地推荐目的地，并交付可直接打开的图文 HTML 报告（行程、风土人情、交通票价、费用估算、路线地图）。用于「元旦/春节去哪」「帮我规划几天行程」「两个人从不同城市出发在哪会合」「预算 X 元能去哪」这类请求。
-version: 1.6.0
+version: 1.7.0
 license: MIT
 triggers:
   - 用户给出日期/假期长度，询问去哪、怎么排、要花多少钱
@@ -26,7 +26,7 @@ tools:
 4. **当同行者不在同一城市时，先问预算口径**：共同 / 各自 / 统一上限，分别算两人花费；不把一个人的上限强加给另一个人；
 5. 交通票价只认实查，带查询时间、参考乘车日、适用日期与预售期状态；
 6. **每个推荐的群都给完整方案**（行程 / 景点 / 交通 / 费用），并在群内城市同省或相邻省的前提下组群；
-7. 交付一个离线可开的 HTML 文件夹：图片下限 2 张、不设上限，逐张署名，每个方案带一张经纬度 SVG 路线图（可选高德 key 在线地图）；
+7. 交付一个离线可开的 HTML 文件夹：**每个景点 4–6 张图（地标/世遗 6–10 张，不设上限）**，逐张署名，每个方案带一张经纬度 SVG 路线图（可选高德 key 在线地图）；
 8. **预算口径必须问清**：两个人距离不同、收入/上限不同，可以共同总预算、各自上限或统一上限；不能默认按「最吃亏者」一刀切；
 9. **先过季节门槛再推荐**：夏天不推哈尔滨、雨季不推山区徒步；非当季的地方要么不列，要么写清「这个月为什么不适合」；
 10. **用户点名的地方不设预算上限**：用户提过的候选照常出完整方案，按出行时段（元旦/春节溢价）把真实预计花费写出来，不用 ¥ 上限把它筛掉；
@@ -43,13 +43,16 @@ travel-recommend/
 ├─ prompts/                     # 子 agent 提示词（独立文件，不塞进 SKILL.md）
 │  ├─ season-factcheck.md       # 给用户看名单前的季节/闭园/证件核查
 │  └─ final-review.md           # 交付前的整体审核
-└─ scripts/                     # Python（标准库 + requests/json5/Pillow，uv 直接跑）
-   ├─ fetch_rail_fares.py
-   ├─ fetch_images.py
-   ├─ verify_report.py
-   ├─ package_report.py
-   ├─ calc_budget.py
-   └─ lib.py
+├─ scripts/                     # Python（标准库 + requests/json5/Pillow，uv 直接跑）
+│  ├─ fetch_rail_fares.py
+│  ├─ fetch_images.py           # 精确文件名（File:xxx）
+│  ├─ fetch_images_search.py    # 关键词检索抓图（多源并发 + 熔断）
+│  ├─ fetch_geo.py              # 名称 → 经纬度（维基 + Wikidata）
+│  ├─ optimize_images.py        # 图片压缩，控包体积
+│  ├─ verify_report.py
+│  ├─ package_report.py
+│  ├─ calc_budget.py
+│  └─ lib.py
 ```
 
 模板自带全部前端代码，**skill 可独立分享，不需要附带任何成品报告**。
@@ -142,6 +145,11 @@ travel-recommend/
 - **A. 离线 SVG（默认）**：零依赖、`file://` 双击可开，按经纬度自绘。
 - **B. 高德在线（可选）**：用户自己申请 key，填 `meta.mapMode: "amap"`、`meta.amapKey`，必要时 `meta.amapSecurity`。需要联网，且 key 可能限制 `file://` 来源；加载失败时模板自动回退 SVG。
 - 没 key 不要承诺在线地图；不要用高德/百度静态图 API 假装离线。
+- **选了 B 但没给 key 属于「未完成确认」，必须单独追问一次**：
+  > 你选的是高德在线，但我还没拿到 key。请把 web 端【JS API】的 key 发我（控制台 → 应用管理 → 添加 Key → 服务平台选「Web端(JS API)」）；如果你的 key 开了安全密钥，把 `securityJsCode` 也一并给我。
+  > 如果你暂时没有 key，回一句「先用离线 SVG」，我就切离线示意图，并在报告顶部注明「本方案不含在线底图」。
+  规则：不要默默回退 SVG（用户会以为有底图）、不要用静态图 API 冒充、不要在报告里写「可切换高德」却不给入口；只有用户明确同意降级才用 SVG。
+- key 到手后自检一次：`meta.mapMode === "amap"` 且 `meta.amapKey` 非空才继续；`file://` 下高德可能因域名白名单失败，模板会回退 SVG，但**交付说明里必须写清「需联网、失败会回退示意图」**。
 - 选择写进 `meta.mapMode`（`svg` / `amap`），并在报告顶部说明是否需要联网。
 
 ### 澄清循环（Clarify Loop）
@@ -173,7 +181,7 @@ stateDiagram-v2
 - 5 个硬字段 + 预算口径都有明确值；
 - 无内部矛盾（日期↔天数、预算↔交通、同行者↔出发地、两人上限↔总预算）；
 - 季节门槛已过（每个候选有 `seasonStatus`，非当季已说明）；
-- 地图模式已确认（未回答则默认 SVG）；
+- 地图模式已确认：`svg`，或 `amap` 且已拿到 key（选了 amap 却没 key = 未确认，单独追问，不得默认回退）；
 - 用户已确认复述。
 
 任一条不满足 → 继续问下一个问题。**宁可多问一轮，不要交一份错方案。**
@@ -192,7 +200,8 @@ stateDiagram-v2
 4. 一共几天（含往返在途）？
 5. 人均预算上限（含大交通）？
 6. 你们两人的上限一样吗？A 共同总预算 / B 各自上限（分别给）/ C 统一上限
-7. 地图要哪种？A 离线 SVG（双击可开）/ B 高德在线（需要你自己的 key）
+7. 地图要哪种？A 离线 SVG（双击可开）/ B 高德在线（需要你自己的 web 端 JS API key）
+   —— 选 B 请直接把 key 贴给我（开了安全密钥的话连 securityJsCode 一起）；只选 B 不给 key，我会再问一次，不会默默换成示意图
 
 不确定的写「不确定」，我会按区间给并标注；但出发地、日期、天数三项必须是确定值，预算至少要给一个上限。
 ```
@@ -395,12 +404,14 @@ over_i(d)   = cost_i(d) - cap_i(d)
 
 行程：每天 3 个时间块，标 duration；抵达日只排 1 个轻项目；返程日按车次倒推留 2 小时冗余；跨城移动日不排门票项目。
 
+**两人不同出发地时，D1 与 Dn 必须写两套时间**：谁的航班/车次、几点落地、几点能到酒店。只按一个人的行程排，另一个人当天根本执行不了（例：A 上午落地、B 19:00 起飞 21:35 落地，却把 14:00「办入住、租雪具」写成两人共同动作）。写法：`"time": "12:00 / 21:50"`，`what` 里分别说明 A 与 B 做什么。
+
 景点卡片必须写全九项，缺一项就是半成品：
 
 | 项 | 要求 |
 |---|---|
 | 介绍 | 60–150 字，回答「是什么 / 为什么值得 / 看什么」，并**与上文风土人情呼应**（点出具体的历史、宗教、工艺或民俗，而不是「风景优美、值得一去」） |
-| 图片 | **越多越好，不设上限**：2 张只是硬下限。能拿到多少外观 / 内部 / 细节 / 不同时段 / 人流状态的图就放多少；地标、世遗、5A 有几个角度就上几张。凑够 2 张就收手 = 不合格 |
+| 图片 | **每景点 4–6 张，地标/世遗/5A 6–10 张，不设上限**（外观、内部、细节、不同时段、人流状态各来一张）。少于 4 张视为不合格；卡片图廊是网格，能排任意张数，不要因为「模板只放 3 张」就少抓 |
 | 门票 | 价格 + 「以公告为准」；免费也要写明 |
 | 建议时长 | 区间，如 2–2.5 h |
 | 开放时间 | 有停止入场时间的要写：最后售票、停止入园、清场、周几闭馆 |
@@ -438,7 +449,9 @@ over_i(d)   = cost_i(d) - cap_i(d)
 规则：
 - `verified` 才能写具体数字；机票/住宿/门票没实查就写区间 + `estimated`；
 - 页面必须显示查询时间与适用日期，远期出行加一句「价格可能变动」；
-- 车次必须核对**实际发车站**（同一条线常有虹桥/上海南/松江三个上车点，票价不同）。
+- 车次必须核对**实际发车站**（同一条线常有虹桥/上海南/松江三个上车点，票价不同）；
+- **金额不许手写**：`clusters[].note`、`plans[].why`、`costs.notes`、`verdict` 里出现的「人均 ¥X / 超 ¥Y / 余 ¥Z」必须由 `costs` 字段推出来，再用 `calc_budget.py` 反算核对一次。手写金额与字段打架是最常见的 blocker（例：`rail.B` 写 1265、文案说「在预算内」，实际 self-consistent 的数是 1042 且结论相反）；
+- **票价必须逐项来自 transport 行**：`costs.rail.A/B` = 该人往返所有交通行之和（含群内动车/地铁），不要凭印象凑整；改一行车次就要同步改总额与所有引用它的文案。
 
 ### 6. 交付物：从自带模板生成，不要从零写页面
 
@@ -455,7 +468,7 @@ travel-report/
   css/style.css       # 视觉系统，改配色再动
   js/data.js          # ★ 只改这个：画像 / 每个群一份完整方案 / 行程 / 票价 / 署名
   js/app.js           # 渲染逻辑，通常不改（加地图时改这一段）
-  images/             # 删掉占位图，放真实图片（下限 2/景点，越多越好，不设上限）
+  images/             # 删掉占位图，放真实图片（4–6/景点，地标 6–10，不设上限）
   README.md           # 改法、来源、许可
 ```
 
@@ -470,6 +483,7 @@ travel-report/
 
 硬性要求：
 - **每个推荐的群，都要有一份完整方案**（行程 / 景点 / 交通 / 费用四项齐全），用户自己切换比较；只给 1–2 个群写详情、其余一句话点评 = 不合格；
+- **每个方案必须带 `sources`**：数组，元素形如 `{ claim, source, date }`，至少 3–4 条，覆盖该群最关键的结论（开园/停止入场/预约放行时间/票价/限流）。页面「本方案情报来源」只在 `p.sources` 非空时渲染——不写这个数组，等于所有关键结论在页面上没有出处；
 - 每个方案带一张**路线地图**（离线可开，见 6.5）；
 - `file://` 直接可开（不用 ES module、不用 fetch 读本地 JSON）；
 - 图片本地化，`<img>` 必须写 `alt`，`loading="lazy"`；
@@ -497,9 +511,23 @@ travel-report/
 1. `meta.mapMode: "amap"`、`meta.amapKey: "<用户的 key>"`，需要安全密钥时加 `meta.amapSecurity`；
 2. 模板动态加载 `https://webapi.amap.com/loader.js`，画城市折线 + 景点序号标记；
 3. 报告顶部写明「地图需联网」；加载失败自动切回 SVG 并在图注说明；
-4. 没 key 就老老实实用 SVG，**不要用静态图 API 假装离线**。
+4. 没 key 就**先单独要 key**（见「地图模式」硬规则），用户明确说「先用离线」再降级为 SVG，**不要用静态图 API 假装离线**。
 
 自检要加一条：`mapMode: "svg"` 时地图容器坐标齐全且无外链图片；`mapMode: "amap"` 时 `amapKey` 非空。
+
+**备选地图方案（实测记录，2026-11-18）**
+
+| 方案 | 需要什么 | 离线能否用 | 实测 |
+|---|---|---|---|
+| 离线 SVG（默认） | 无 | 是，`file://` 双击即开 | 始终可用；只是示意图 |
+| 高德 JS API 2.0 | web 端 key（免费配额；**¥5 万/年是商用授权，个人非商用不需要**） | 否，需联网 | ✅ `file://` + Chrome 实测 `AMap v2.0` 加载成功、0 报错；`file://` 的 referer 白名单可能拦，失败自动回退 SVG |
+| 天地图 WMTS | 免费注册 key | 否 | 未实测；瓦片为国内节点，`file://` 下同样受 referer 限制 |
+| Leaflet + OSM/Carto 瓦片 | 免 key | 否（瓦片在线） | OSM 官方瓦片政策禁止批量下载；国内访问不稳，仅适合海外用户 |
+| MapLibre + PMTiles | 自备 `.pmtiles` 文件 | 是（需随包带几 MB 文件） | 唯一「真离线底图」路线；需要预先切图，报告体积变大 |
+
+**不要**用高德/百度「静态图 API」把一张 PNG 贴上去冒充交互地图；也**不要**为省事把 OSM 瓦片塞进「离线」报告——`file://` 打开就是白屏。
+
+> 浏览器差异：omp 自带 headless WebKit 没有 TLS，无法加载任何 `https` 资源，**不能**用它验证在线地图；验证在线地图必须用真实 Chrome/Edge（`browser.open({ app: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" })`）。
 
 ### 7. 验证清单（交付前逐条过）
 
@@ -510,7 +538,7 @@ travel-report/
 5. 改人数/房价，总额按公式重算，且与 `calc_budget.py` 结果一致；
 6. 390px 下 `document.documentElement.scrollWidth === innerWidth`；
 7. 每个价格旁边能看到查询时间与「实查/估算」标记；
-8. 每个景点都有 60 字以上介绍，且与风土人情呼应；有 `status`（open/off-season/closed/limited）与 `entry`（哪个门进）；非当季/闭园在页面显著报警，不能只藏在提示里；图片越多越好、不设上限，2 张只是硬下限；
+8. 每个景点都有 60 字以上介绍，且与风土人情呼应；有 `status`（open/off-season/closed/limited）与 `entry`（哪个门进）；非当季/闭园在页面显著报警，不能只藏在提示里；**图片 4–6 张（地标 6–10 张）**，`verify_report.py` 对少于 4 张出警告；
 9. 风土人情与景点提示都有本地一手来源；关键结论 ≥2 个独立来源，门票/时间以官方公告为准；
 10. 所有推荐群风格不重复，且**同一群内城市同省或相邻省、任一段 ≤2 小时**；邻近同质城市已合并成群，每段群内交通有时长与票价；
 11. 车次发车站与真实站点一致（用 `fetch_rail_fares.py` 复核，别凭记忆）；
@@ -522,7 +550,7 @@ travel-report/
 17. 预算口径已记录（`shared` / `per_person` / `uniform`）；各自上限时逐人写「超/余多少」，没有用平均值掩盖；
 18. 用户点名的候选即使超预算也在列表里、有完整方案，并写清超出金额与原因；
 19. 给用户确认名单前，有子 agent 预审结果（季节/闭园/交通/证件）；交付前有第二次整体审核记录；
-20. 地图模式已问过用户；SVG 模式离线可开，amap 模式有 key 并标注需联网。
+20. 地图模式已问过用户；SVG 模式离线可开，amap 模式有 key 并标注需联网；**选了 amap 却没给 key 时判不合格——必须回问 key，或拿到用户明确同意后才降级为 SVG**。
 
 ### 8. 交付前二次审核 + 打包（硬步骤）
 
@@ -544,10 +572,43 @@ travel-report/
 |---|---|---|
 | `fetch_rail_fares.py` | 12306 车次 + 各席别实价；自动带 cookie、核对实际发车站；空结果时提示「可能未开售」 | `uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 泉州南 2026-11-25 O` |
 | `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重、生成可直接粘贴的 credits；`--keep-credits` 增量补图 | `uv run --no-project scripts/fetch_images.py images manifest.tsv --sleep 4` |
+| `fetch_images_search.py` | **多源检索抓图**（Commons 搜索 / Commons 分类 / Openverse / 维基条目首图），各自限速 + 熔断 + md5 去重 + 署名；清单格式 `<slug>\|<检索词>\|<张数>` | `uv run --no-project scripts/fetch_images_search.py images manifest.tsv --sleep 4` |
 | `verify_report.py` | 报告包静态自检（图片/署名/重复/外链/占位符/价格结构/季节与预算口径） | `uv run --no-project scripts/verify_report.py travel-report` |
 | `package_report.py` | 先自检再打 zip，保留顶层目录，排除中间文件 | `uv run --no-project scripts/package_report.py travel-report out.zip` |
+| `optimize_images.py` | 把图片压到可分享体积（长边 ≤1400、JPEG q82）；实测 74.4 MB → 20.6 MB | `uv run --no-project scripts/optimize_images.py travel-report/images` |
+| `fetch_geo.py` | 按名称查经纬度（维基 `prop=coordinates` + Wikidata P625 兜底），输出可粘进 `data.js` 的坐标 | `uv run --no-project scripts/fetch_geo.py geo.tsv --out geo.json` |
 | `calc_budget.py` | 与页面同公式的预算复算 | `uv run --no-project scripts/calc_budget.py --rail-a 1500 --rail-b 925 --stay 350 --nights 5 --rooms 1 --food 120 --days 6 --local 30 --tickets 150 --exp 100 --buffer 10 --people 2` |
 | `lib.py` | 公共函数（UA、cookie、重试、md5、署名清洗） | 由其他脚本 import |
+
+### 图片从哪来（2026-11-18 实测，按可用性排序）
+
+`fetch_images_search.py` 内置四个免 key 图源，用 `--sources` 选择，默认全开：
+
+| 源 | 免 key | 限速 | 擅长 | 备注 |
+|---|---|---|---|---|
+| `commons`（关键词搜索） | ✅ | 3.5 s | 地名 + 英文专名，命中率最高 | 同义词多试两次，别一次就放弃 |
+| `commonscat`（`Category:<词>`） | ✅ | 3.5 s（与 commons 共用） | 地标、世遗有现成分类，一次能出十几张 | 分类名要用英文/专名，`Category:Gulangyu` 比中文更稳 |
+| `wikipedia`（条目首图） | ✅ | 1.5 s | 冷门景点也有首图，构图通常最好 | 首图的作者/许可必须回查 Commons `extmetadata`，脚本已做 |
+| `openverse`（聚合 Flickr/博物馆） | ✅ | 1.2 s | 风格多样，补充非 Commons 视角 | 偶发返回 0 条或长时间挂起，已加 25 s 超时 + 熔断 |
+
+实测**不可用**（不要再试）：Library of Congress（Cloudflare 403）、The Met（API 2026-10 下线）、Art Institute of Chicago（Cloudflare 403）、Pexels / Pixabay / Unsplash（需 key，且要注明来源用户名）。国内图库（马蜂窝/携程/小红书）没有可用授权 API，抓到也**不能**直接用在 CC 报告里。
+
+选源建议：先 `commons,commonscat` 打底（署名最干净），数量不够再加 `wikipedia`，需要不同风格再加 `openverse`。单源卡住时，用 `--sources commons --workers 5 --sleep 2.5` 反而更快。
+
+### 已固化的坑（2026-11-18 实测，下次直接照做）
+
+| 现象 | 根因 | 现在的做法 |
+|---|---|---|
+| 查远期车票脚本抛 `JSONDecodeError` | 12306 超出 15 天预售期时返回 HTML 页（200, text/html） | `fetch_rail_fares.py` 先看 content-type，非 JSON → 输出「未开售，不是无车」并退出 3 |
+| 明明有车却报「没有匹配席别的车次」 | 12306 的 `from/to` 参数不再过滤，返回整片区域车次；脚本按 `fields[7]` 终到站过滤后全被丢弃 | 零匹配时打印「终到站分布」（苏州/太仓/张家港…），提示换邻近大站或改飞机 |
+| 图片全写到 `C:\c\Users\...` | Windows 的 Python 把 POSIX 路径 `/c/...` 当成当前盘下的 `\c\...` | 一律用相对路径（`../travel-report/images`）或 `C:/Users/...`，不要用 `/c/...` |
+| `uv run --no-project -c "…"` 报 unexpected argument | `uv run` 不接受 `-c` | 写 `uv run --no-project python -c "…"` |
+| 补图把已抓的 `slug-1.jpg` 覆盖掉 | 编号固定从 1 开始 | `fetch_images_search.py` 从「已有最大编号 +1」续写 |
+| 抓图任务跑十几分钟只出几张、像是卡死 | Openverse 请求会长时间挂起，长超时 × 重试把线程占满 | 超时压到 25s、重试 1 次；同一源连续 4 次异常即熔断，本批放弃该源 |
+| 凑不到 4 张「同主题」实图 | 冷门景点在 Commons/Openverse 上没有足够照片 | 先扩大检索词/换源再试一轮；仍不足 4 张就**删掉该景点卡片**（`pois` 里不写），在 `days` 行程文字里保留；绝不用异地/异主题照片冒充 |
+| 高德地图控制台报 `file://webapi.amap.com/theme/.../mark_bs.png` 404 | 高德默认 marker 图标是协议相对 URL，`file://` 下被解析成本地路径 | 城市标记必须传自定义 `content`（模板 `app.js` 已改），只用 `AMap.Marker({content})`，不要用默认图标 |
+| 用 headless WebKit 验在线地图/HTTPS 一律失败（`TLS support is not available`） | omp 自带 WebKit 无 TLS | 在线地图与最终渲染验证一律用真 Chrome：`browser.open({app: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"})` |
+| 方案 tab 点不动、总额不变 | 按 `dataset.plan` 匹配，但模板 tab 只有 `<span class="tab-name">` | 用 `.tab-name` 文本匹配后 `click()`；验证时必须逐 tab 读 `.row-total` |
 
 **三条纪律**
 
@@ -577,6 +638,7 @@ travel-report/
 - ❌ 用户点名的目的地因为超预算被删掉，或只给一行「太贵了」
 - ❌ 用户有高德 key 却硬塞 OSM 瓦片，`file://` 打开一片空白
 - ❌ 没 key 却承诺在线地图，或用静态图 API 假装离线
+- ❌ 用户选了高德在线却没给 key，不追问就直接出 SVG，或在报告里写「可切换高德」却不给入口
 - ❌ 交付前不做第二次子 agent 审核，也不打包，只丢一个目录
 - ❌ 把同质又邻近的城市并列成多个候选（青岛 / 威海 / 烟台只该是一个群）
 - ❌ 群内交通只写「很近」，不给车次/船班、时长与票价
@@ -585,7 +647,8 @@ travel-report/
 - ❌ 风土人情靠模型记忆或百科改写，不查任何本地人帖子
 - ❌ 把单篇爆款笔记当事实，不做交叉来源
 - ❌ 提示把介绍最后一句抄一遍，等于没写提示
-- ❌ 所有景点一律 2 张图（2 张只是下限，图源够就多加，别停在合格线上）
+- ❌ 景点只放 2–3 张图就收手（目标 4–6 张，地标 6–10 张）
+- ❌ 因为「模板看起来只放 3 张」就少抓图——图廊是网格，能排任意张数
 - ❌ 推荐的群只给 1–2 个完整方案，其余只写一行点评——用户没法自己比较
 - ❌ 用户提过想去哪（长白山/雪乡/三亚），报告里没有它——先做后问的另一种形态
 - ❌ 不确认用户去过哪，把人家去年玩过的城市再推荐一遍——浪费名额也浪费假期
@@ -635,3 +698,15 @@ travel-report/
 审核：<子 agent 预审 + 交付前复核的结论；FAIL 项已修>
 交付：<zip 路径 + 文件夹路径 + 双击 index.html 说明 + 如何改数据>
 ```
+
+## 变更记录
+
+### 1.7.0（2026-11-18）
+
+- **地图**：新增硬规则——用户选了高德却没给 key 时必须单独追问，不得默默回退 SVG；门禁、验证清单、反模式同步加条。补「五种地图方案实测表」；模板修掉 `file://` 下高德默认 marker 图标 404（改自定义 `content`）、城市标签用错 CSS 变量（`--fg` 不存在，改 `--accent`）、同城点位重叠（投影后自动双向推开）。
+- **图源**：`fetch_images_search.py` 扩到四源（Commons 关键词 / Commons 分类 / Openverse / 维基条目首图），各自限速、异常熔断（连续 4 次放弃该源）、超时压到 25s、补图从「已有最大编号 +1」续写；新增「图源可用性」表与「实测不可用」清单。
+- **图片标准**：每景点 4–6 张、地标 6–10 张、不设上限；`verify_report.py` 对少于 4 张出警告。
+- **数据纪律**：金额不许手写，必须由 `costs` 字段经 `calc_budget.py` 反算；`costs.rail.A/B` 必须等于该人所有交通行之和；两人不同出发地时 D1/Dn 必须写两套时间；`plans[].sources` 变为必填并在自检里检查。
+- **新脚本**：`fetch_images_search.py`（多源抓图）、`fetch_geo.py`（维基 + Wikidata 坐标）、`optimize_images.py`（74MB → 20MB 级压缩）。
+- **修脚本**：`fetch_rail_fares.py` 区分「超预售期返回 HTML」与「无车」；12306 不再按 from/to 过滤时，零匹配给出终到站分布。
+- **新增「已固化的坑」表**：Windows 下 `/c/...` 被当 `C:\c\...`、`uv run -c` 不合法、tab 选择器要用 `.tab-name`、headless WebKit 无 TLS 不能验在线地图等。

@@ -177,7 +177,9 @@ def main() -> int:
                 poi_count += 1
                 imgs = poi.get("imgs") or []
                 if len(imgs) < 2:
-                    err(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（底线 2 张）")
+                    err(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 4–6 张）")
+                elif len(imgs) < 4:
+                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 4–6 张，地标 6–10 张）")
                 if not poi.get("intro") or len(poi["intro"]) < 30:
                     err(f"[{key}] 景点「{poi.get('name')}」缺介绍或过短")
                 if not poi.get("ticket") or not poi.get("dur"):
@@ -191,6 +193,16 @@ def main() -> int:
                         err(f"[{key}/{leg}] {row.get('train')} 票价异常：{row.get('price')}")
                     if not row.get("train") or not row.get("route"):
                         err(f"[{key}/{leg}] 存在缺车次或区间的行")
+            sources = plan.get("sources") or []
+            if not sources:
+                warn(f"[{key}] 没有 sources：页面「本方案情报来源」整段不会渲染")
+            else:
+                incomplete = [s for s in sources
+                              if not all(s.get(field) for field in ("claim", "source", "date"))]
+                if incomplete:
+                    warn(f"[{key}] sources 有 {len(incomplete)} 条缺 claim/source/date")
+                if len(sources) < 3:
+                    warn(f"[{key}] sources 只有 {len(sources)} 条（建议 ≥3，覆盖预约/票价/限流）")
         ok(f"共 {poi_count} 个景点，引用 {len(referenced)} 张图")
 
         credits = trip.get("credits") or {}

@@ -178,6 +178,26 @@
     });
     table.appendChild(tbody);
 
+    if (T.meta.exclusion) {
+      var ex = T.meta.exclusion;
+      var wrap = $("#score .wrap") || table.parentNode;
+      var stale = wrap.querySelector(".exclusion");
+      if (stale) stale.parentNode.removeChild(stale);
+      var box = el("div", "card exclusion");
+      box.appendChild(el("h3", null, ex.confirmed ? "已替你排除" : "未确认是否去过"));
+      var list = el("ul", "excl-list");
+      (ex.items || []).forEach(function (item) {
+        list.appendChild(el("li", null,
+          item.place + " — " + item.reason + (item.replaced_by ? "（替换为 " + item.replaced_by + "）" : "")));
+      });
+      if (!(ex.items || []).length) {
+        list.appendChild(el("li", null, "本次没有整群替换：你确认过 6 个群都没去过，也没有明确不想去的。"));
+      }
+      box.appendChild(list);
+      if (ex.note) box.appendChild(el("p", "card-sub", ex.note));
+      wrap.appendChild(box);
+    }
+
     var sw = $("#preset-switch");
     sw.innerHTML = "";
     T.presets.forEach(function (p) {
@@ -267,10 +287,29 @@
       svg.appendChild(t);
     });
 
-    pois.forEach(function (poi, i) {
+    // 同城景点常落在同一条街上：投影后距离过近就沿连线双向推开，保证编号可读
+    var pts = pois.map(function (poi) {
       var v = xy(poi.geo);
-      v[0] += poi.geo.jx || 0;
-      v[1] += poi.geo.jy || 0;
+      return [v[0] + (poi.geo.jx || 0), v[1] + (poi.geo.jy || 0)];
+    });
+    var moved = false;
+    var MIN_GAP = 26;
+    for (var a = 0; a < pts.length; a++) {
+      for (var b = a + 1; b < pts.length; b++) {
+        var dx = pts[b][0] - pts[a][0], dy = pts[b][1] - pts[a][1];
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist >= MIN_GAP) continue;
+        if (dist < 0.5) { dx = 1; dy = -1; dist = Math.SQRT2; }
+        var push = (MIN_GAP - dist) / 2 + 1;
+        var ux = dx / dist, uy = dy / dist;
+        pts[a][0] -= ux * push; pts[a][1] -= uy * push;
+        pts[b][0] += ux * push; pts[b][1] += uy * push;
+        moved = true;
+      }
+    }
+
+    pois.forEach(function (poi, i) {
+      var v = pts[i];
       var ring = document.createElementNS(NS, "circle");
       ring.setAttribute("cx", v[0]);
       ring.setAttribute("cy", v[1]);
@@ -300,7 +339,7 @@
     });
 
     fig.appendChild(svg);
-    var dense = pois.some(function (poi) { return poi.geo.jx || poi.geo.jy; });
+    var dense = moved || pois.some(function (poi) { return poi.geo.jx || poi.geo.jy; });
     fig.appendChild(el("figcaption", "map-cap",
       "示意地图 · 按经纬度等距圆柱投影绘制，非瓦片底图；数字对应下方景点卡片顺序。" +
       (dense ? "密集点位已做小幅屏幕避让。" : "")));
@@ -342,16 +381,27 @@
       }
       p.geo.cities.forEach(function (c) {
         map.add(new AMap.Marker({
-          position: [c.lng, c.lat], title: c.name,
-          label: { content: c.name, direction: "top" }
+          position: [c.lng, c.lat], title: c.name, zIndex: 300,
+          content: '<span class="amap-city">' + c.name + "</span>",
+          offset: new AMap.Pixel(-18, -38)
         }));
       });
+      var placed = [];
       (p.pois || []).forEach(function (poi, i) {
         if (!poi.geo) return;
+        // 同城景点常在同一条街上：与已放置的点太近就沿对角线错开，避免编号糊在一起
+        var offX = 0, offY = 0;
+        placed.forEach(function (q) {
+          if (Math.abs(q.lat - poi.geo.lat) < 0.02 && Math.abs(q.lng - poi.geo.lng) < 0.02) {
+            offX += 19;
+            offY -= 17;
+          }
+        });
+        placed.push({ lat: poi.geo.lat, lng: poi.geo.lng });
         map.add(new AMap.Marker({
-          position: [poi.geo.lng, poi.geo.lat], title: poi.name,
+          position: [poi.geo.lng, poi.geo.lat], title: poi.name, zIndex: 100 + i,
           content: '<span class="amap-pin">' + (i + 1) + "</span>",
-          offset: new AMap.Pixel(-11, -11)
+          offset: new AMap.Pixel(-11 + offX, -11 + offY)
         }));
       });
       map.setFitView();

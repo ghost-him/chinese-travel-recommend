@@ -802,6 +802,18 @@ footer strong { color: var(--ink-soft); }
   box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
 }
 
+.amap-city {
+  display: inline-block; padding: 2px 7px; border-radius: 4px;
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+}
+
+/* ---------- 候选回看：已替你排除 ---------- */
+.exclusion { margin-top: 18px; }
+.excl-list { margin: 0 0 10px; padding-left: 18px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.8; }
+.excl-list li { margin-bottom: 2px; }
+
 /* ---------- 季节状态 / 用户点名 ---------- */
 .season-off { background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold); }
 .season-closed { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
