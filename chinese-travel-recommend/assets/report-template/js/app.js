@@ -154,6 +154,9 @@
       if (r.d.visited && r.d.userConfirmedPlan) {
         tdName.appendChild(el("span", "badge badge-est", "已去过 · 按你要求保留"));
       }
+      if (r.d.visited && !r.d.userConfirmedPlan) {
+        tdName.appendChild(el("span", "badge badge-est", "未确认是否去过"));
+      }
       tr.appendChild(tdName);
       dims.forEach(function (dm) {
         var v = r.d.s[dm.key] || 0;
@@ -729,6 +732,9 @@
       return null;
     });
 
+    var inRails = travelers.map(function (t, i) {
+      return field((t.label || ("同行者 " + (i + 1))) + " 路费", t.rail || 0, 0, 20000, 10, "元");
+    });
     var inPeople = field("住宿分摊人数", travelers.length, 1, 12, 1, "人");
     var inRooms = field("房间数", c.rooms, 1, 6, 1, "间");
     var inStay = field("住宿单价", c.stayPerNight, 100, 3000, 10, "元/晚");
@@ -751,8 +757,9 @@
       var food = Math.max(0, +inFood.value || 0);
 
       var stayTotal = stay * c.nights * rooms;
+      var rails = travelers.map(function (_, i) { return Math.max(0, +inRails[i].value || 0); });
       var rows = [
-        { k: "大交通（往返）", vals: travelers.map(function (t) { return t.rail || 0; }), tags: travelers.map(function (t) { return t.tag || "est"; }) },
+        { k: "大交通（往返）", vals: rails, tags: travelers.map(function (t, i) { return rails[i] === Math.max(0, +t.rail || 0) ? (t.tag || "est") : "est"; }) },
         { k: "住宿（" + c.nights + " 晚 × " + rooms + " 间，分摊）", vals: travelers.map(function () { return stayTotal / people; }), tags: travelers.map(function () { return "est"; }) },
         { k: "餐饮（" + c.days + " 天）", vals: travelers.map(function () { return food * c.days; }), tags: travelers.map(function () { return "est"; }) },
         { k: "市内交通（" + c.days + " 天）", vals: travelers.map(function () { return c.localPerDay * c.days; }), tags: travelers.map(function () { return "est"; }) },
@@ -848,7 +855,7 @@
       }
     }
 
-    [inPeople, inRooms, inStay, inFood].forEach(function (i) {
+    inRails.concat([inPeople, inRooms, inStay, inFood]).forEach(function (i) {
       i.addEventListener("input", compute);
     });
     compute();

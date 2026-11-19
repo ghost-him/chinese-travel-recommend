@@ -17,9 +17,9 @@ Built for travel inside mainland China: it knows the 12306 presale window, Chine
 
 | You say | It does |
 |---|---|
-| "5 days off around National Day, leaving from Hangzhou — where can we go?" | Bounds the radius by trip length, proposes mutually exclusive location clusters, each with a full plan |
+| "5 days off around National Day, leaving from Hangzhou — where can we go?" | Bounds the radius by trip length, proposes at least five mutually exclusive location combos, each with a full plan (closed/visited places you decline get a reason card instead) |
 | "I'm in Beijing, my friend is in Guangzhou — where should we meet?" | Asks how to split the budget first (shared / per-person caps / uniform cap) instead of forcing one person's cap on the other |
-| "¥4,000 per person — is that enough?" | Drops destinations that fail the budget check; **places you named are kept**, with the overrun spelled out |
+| "¥4,000 per person — is that enough?" | Flags destinations over the cap instead of dropping them; **places you named are exempt**, and un-named ones may exceed by up to ¥3,000 per person before being dropped |
 | "We talked about going to Dunhuang" | Dunhuang must appear as a candidate with its own complete plan |
 | "I've already been to half of these" | Shows the shortlist before digging; confirmed visited/disliked clusters are replaced as a whole |
 | "Harbin in July" | Runs the season gate; Ice World is flagged off-season instead of being quietly scheduled |
@@ -92,12 +92,12 @@ travel-report/
 
 Inside the report:
 
-- **Cluster scorecard**: seven weighted dimensions, season status, whether you named it, budget overrun.
-- **A complete plan per cluster**: day-by-day itinerary, attraction cards (intro + ticket + duration + hours + **status + gate** + how to get there + one practical tip), rail/flight options with fares, cost calculator.
+- **Location scorecard**: seven weighted dimensions, season status, whether you named it, budget overrun.
+- **A complete plan per location combo**: day-by-day itinerary, attraction cards (intro + ticket + duration + hours + **status + gate** + how to get there + one practical tip), rail/flight options with fares, cost calculator. Closed/visited places you explicitly decline a plan for get a reason card or an "excluded for you" entry instead.
 - **Attraction-level season warnings**: closed or off-season items get a badge and a top-of-plan alert — never buried in a tip.
 - **Fare provenance**: query time + reference travel date + verified/estimated, plus "not yet on sale" instead of "no train".
 - **Route map**: SVG projected from real coordinates by default; AMap only with the user's key, with automatic fallback.
-- **Cost calculator**: changing headcount or room rate recomputes instantly; overrun is judged under `shared` / `per_person` / `uniform`.
+- **Cost calculator**: changing per-person rail fare, room rate or headcount recomputes instantly; overrun is judged under `shared` / `per_person` / `uniform`.
 
 ---
 
@@ -137,7 +137,7 @@ Paths are relative to this README; the skill itself lives in `chinese-travel-rec
 ```bash
 cd chinese-travel-recommend
 
-# Rail fares (beyond the ~15-day 12306 presale window it reports "not on sale", not "no train")
+# Rail fares (beyond the ~14-day 12306 presale window it reports "not on sale", not "no train")
 uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 黄山北 2026-11-25
 
 # Images: manifest lines are slug|Commons file name|width
@@ -168,7 +168,7 @@ uv run --no-project scripts/package_report.py ../travel-report out.zip
 | Season gate before scoring | Recommendations that ignore seasons are wrong no matter how well written |
 | Verify opening hours, gates and last entry per attraction | "It was closed" and "wrong gate, one hour detour" are the most common failures |
 | Clusters stay within one or adjacent provinces | Cross-country "clusters" spend more time in transit than at the destination |
-| A complete plan for every cluster | Detailing only the top pick makes the choice for the user |
+| A complete plan for every location combo (unless you declined one for a closed/visited place) | Detailing only the top pick makes the choice for the user |
 | 4–6 images per attraction (6–10 for landmarks) | Two images read like a catalogue, not a report |
 | Offline SVG map by default | Tile maps need network or tens of MB; AMap stays an opt-in enhancement |
 

@@ -104,8 +104,10 @@ def main() -> int:
         if not clusters:
             warn("没有 clusters：仍是按城市推荐，未按「地点群」组群")
         else:
-            if len(clusters) < 5:
-                err(f"只有 {len(clusters)} 个地点群（要求 ≥5，少于 5 个直接不合格）")
+            picked = sum(1 for cluster in clusters if cluster.get("userPicked"))
+            required = picked + max(3, 5 - picked)
+            if len(clusters) < required:
+                err(f"只有 {len(clusters)} 个地点群（用户点名 {picked} 个，按公式要求 ≥{required}，少于要求直接不合格）")
             styles: set[str] = set()
             cities: set[str] = set()
             for cluster in clusters:
@@ -141,13 +143,28 @@ def main() -> int:
                 name = cluster.get("name", "")
                 matched = [key for key, label in labels.items() if label.startswith(name)]
                 closed = cluster.get("seasonStatus") == "closed"
+                visited = cluster.get("visited") is True
                 confirmed = cluster.get("userConfirmedPlan") is True
+                plan_request = cluster.get("planRequest")
+                if plan_request not in (None, "requested", "declined", "no_reply"):
+                    err(f"群「{name}」planRequest 非法：{plan_request}")
                 if closed:
                     if matched and not confirmed:
                         err(f"群「{name}」标了闭园/停航，有方案但没有 userConfirmedPlan: true")
                     # closed + 无方案：允许，作为原因卡
                 elif not matched:
                     err(f"群「{name}」没有对应的完整方案（plans 里缺 clusterLabel 以它开头的条目）")
+                if plan_request == "declined" and matched and not visited:
+                    err(f"群「{name}」planRequest=declined，却仍有方案；应只保留原因卡，或整群替换")
+                if visited:
+                    if plan_request == "declined":
+                        err(f"群「{name}」已确认去过且不要方案，但仍在地点列表里；应整群替换并写入「已替你排除」")
+                    if plan_request == "requested" and not confirmed:
+                        err(f"群「{name}」visited + planRequest=requested，但没有 userConfirmedPlan: true")
+                    if plan_request == "no_reply" and not matched:
+                        err(f"群「{name}」visited 未确认（no_reply），但缺完整方案；应保留清单并出方案")
+                    if plan_request is None:
+                        warn(f"群「{name}」visited=true 但没有记录二次确认结果（planRequest）")
             for key, label in labels.items():
                 if label and not any(label.startswith(cluster.get("name", "")) for cluster in clusters):
                     err(f"方案「{key}」的 clusterLabel「{label}」对不上任何地点群")
@@ -164,6 +181,9 @@ def main() -> int:
                 if status in ("off-season", "closed") and not poi.get("statusNote"):
                     err(f"[{key}] 景点「{name}」标了 {status} 但没写 statusNote")
 
+        mode = meta.get("budgetMode")
+        if mode == "shared" and plans and not meta.get("budgetCap"):
+            err("budgetMode=shared 但没有 meta.budgetCap：无法判断共同预算")
         for key, plan in plans.items():
             costs = plan.get("costs") or {}
             travelers = costs.get("travelers") or []
@@ -173,6 +193,14 @@ def main() -> int:
                 for idx, t in enumerate(travelers):
                     if t.get("rail") is None:
                         warn(f"[{key}] costs.travelers[{idx}] 缺 rail（出发地到组合开始位置的往返路费）")
+                if mode in ("per_person", "uniform"):
+                    meta_caps = meta.get("budgetCaps")
+                    for idx, t in enumerate(travelers):
+                        cap = t.get("cap")
+                        if cap is None and isinstance(meta_caps, list) and idx < len(meta_caps):
+                            cap = meta_caps[idx]
+                        if cap is None:
+                            err(f"[{key}] costs.travelers[{idx}] 缺 cap，且 meta.budgetCaps 未提供；{mode} 无法逐人判断超支")
             required_cost_fields = ("stayPerNight", "nights", "rooms", "foodPerDay", "days",
                                     "localPerDay", "groupTransport", "tickets", "experiences", "bufferPct")
             missing_cost = [field for field in required_cost_fields if costs.get(field) is None]

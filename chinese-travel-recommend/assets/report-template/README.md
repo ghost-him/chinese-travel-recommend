@@ -7,7 +7,7 @@
 report-template/
 ├─ index.html      结构（章节、锚点、灯箱容器）
 ├─ css/style.css   视觉系统（无外链字体、无 CDN、含打印样式）
-├─ js/app.js       渲染：群评选 / 方案 tab / 行程 / 景点 / 费用计算器 / 灯箱
+├─ js/app.js       渲染：地点评选 / 方案 tab / 行程 / 景点 / 费用计算器 / 灯箱
 ├─ js/data.js      ★ 唯一需要改的文件（当前是占位数据）
 └─ images/         4 张 SVG 占位图，替换后删除
 ```
