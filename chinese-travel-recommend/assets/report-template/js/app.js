@@ -2,6 +2,14 @@
 (function () {
   "use strict";
   var T = window.TRIP;
+  (function deriveTripDays() {
+    var s = T.meta && T.meta.tripStart, e = T.meta && T.meta.tripEnd;
+    if (!s || !e) return;
+    var start = Date.parse(s + "T00:00:00Z"), end = Date.parse(e + "T00:00:00Z");
+    if (!isNaN(start) && !isNaN(end) && end >= start) {
+      T.meta.tripDays = Math.round((end - start) / 86400000) + 1;
+    }
+  })();
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
@@ -28,7 +36,7 @@
     $("#hero-title").textContent = T.meta.title;
     $("#hero-sub").textContent = T.meta.subtitle;
     var chips = $("#hero-chips");
-    (T.meta.chips || [T.meta.tripDays + " 天", "推荐单位：地点群"]).forEach(function (t) {
+    (T.meta.chips || [T.meta.tripDays + " 天", "推荐单位：地点组合"]).forEach(function (t) {
       chips.appendChild(el("span", "chip", t));
     });
 
@@ -39,7 +47,7 @@
     if ($("#src-ref")) $("#src-ref").textContent = T.meta.fareRefDate || "—";
     if (T.meta.isTemplate) {
       var banner = el("div", "template-banner",
-        "模板占位数据：替换 js/data.js 后，把 meta.isTemplate 改为 false 再对外分享。");
+        "模板占位数据：替换 js/data.js 后，把 meta.isTemplate 改为 false 再交付。");
       document.body.insertBefore(banner, document.body.firstChild);
     }
 
@@ -115,7 +123,7 @@
     var table = $("#score-table");
     table.innerHTML = "";
     var thead = el("thead"), htr = el("tr");
-    htr.appendChild(el("th", "th-name", "地点群"));
+    htr.appendChild(el("th", "th-name", "候选地点"));
     dims.forEach(function (d) {
       var th = el("th", null, d.label);
       th.appendChild(el("span", "th-w", d.w + "%"));
@@ -142,6 +150,9 @@
         var pickText = "你点名";
         if (r.d.overBudget > 0) pickText += " · 超 ¥" + Math.round(r.d.overBudget).toLocaleString("zh-CN");
         tdName.appendChild(el("span", "badge badge-pick", pickText));
+      }
+      if (r.d.visited && r.d.userConfirmedPlan) {
+        tdName.appendChild(el("span", "badge badge-est", "已去过 · 按你要求保留"));
       }
       tr.appendChild(tdName);
       dims.forEach(function (dm) {
@@ -171,7 +182,7 @@
       tdNote.colSpan = dims.length + 2;
       tdNote.appendChild(el("span", "note-main", r.d.note));
       if (r.d.seasonNote) tdNote.appendChild(el("span", "note-season", "季节：" + r.d.seasonNote));
-      tdNote.appendChild(el("span", "note-link", "群内：" + r.d.link));
+      tdNote.appendChild(el("span", "note-link", "串联：" + r.d.link));
       trNote.appendChild(tdNote);
       tbody.appendChild(trNote);
     });
@@ -190,7 +201,7 @@
           item.place + " — " + item.reason + (item.replaced_by ? "（替换为 " + item.replaced_by + "）" : "")));
       });
       if (!(ex.items || []).length) {
-        list.appendChild(el("li", null, "本次没有整群替换：你确认过 6 个群都没去过，也没有明确不想去的。"));
+        list.appendChild(el("li", null, "本次没有整组替换：你确认过 " + ((T.clusters || []).length) + " 个地点组合都没去过，也没有明确不想去的。"));
       }
       box.appendChild(list);
       if (ex.note) box.appendChild(el("p", "card-sub", ex.note));
@@ -512,7 +523,7 @@
     days.appendChild(dayGrid);
     root.appendChild(days);
 
-    /* 3.3b 群内扩展 */
+    /* 3.3b 组合内扩展 */
     if (p.extend) {
       var ex = el("section", "block extend");
       ex.appendChild(el("h3", "block-title", p.extend.title));
@@ -527,7 +538,7 @@
         legs.appendChild(row);
       });
       ex.appendChild(legs);
-      ex.appendChild(el("p", "extend-foot", "群内串联同样按 12306 实查：查询时间 " + T.meta.fareQueriedAt + "，参考乘车日 " + T.meta.fareRefDate + "。"));
+      ex.appendChild(el("p", "extend-foot", "组合内串联同样按 12306 实查：查询时间 " + T.meta.fareQueriedAt + "，参考乘车日 " + T.meta.fareRefDate + "。"));
       root.appendChild(ex);
     }
 
@@ -710,8 +721,16 @@
       form.appendChild(wrap);
       return input;
     }
-    var inPeople = field("出行人数", 2, 1, 8, 1, "人");
-    var inRooms = field("房间数", c.rooms, 1, 4, 1, "间");
+
+    var travelers = (c.travelers && c.travelers.length) ? c.travelers : [];
+    var caps = travelers.map(function (t, i) {
+      if (t.cap != null) return t.cap;
+      if (T.meta.budgetCaps && T.meta.budgetCaps[i] != null) return T.meta.budgetCaps[i];
+      return null;
+    });
+
+    var inPeople = field("住宿分摊人数", travelers.length, 1, 12, 1, "人");
+    var inRooms = field("房间数", c.rooms, 1, 6, 1, "间");
     var inStay = field("住宿单价", c.stayPerNight, 100, 3000, 10, "元/晚");
     var inFood = field("餐饮标准", c.foodPerDay, 50, 800, 10, "元/人/天");
     node.appendChild(form);
@@ -720,76 +739,72 @@
     node.appendChild(out);
 
     function money(n) { return "¥" + Math.round(n).toLocaleString("zh-CN"); }
+    function badge(tag) {
+      return el("span", "badge badge-inline " + (tag === "real" ? "badge-real" : "badge-est"),
+        tag === "real" ? "实查" : "估算");
+    }
 
     function compute() {
-      var people = Math.max(1, +inPeople.value || 1);
+      var people = Math.max(1, +inPeople.value || travelers.length);
       var rooms = Math.max(1, +inRooms.value || 1);
       var stay = Math.max(0, +inStay.value || 0);
       var food = Math.max(0, +inFood.value || 0);
 
       var stayTotal = stay * c.nights * rooms;
       var rows = [
-        { k: "大交通（往返）", a: c.rail.A, b: c.rail.B, tagA: c.rail.tagA || "est", tagB: c.rail.tagB || "est" },
-        { k: "住宿（" + c.nights + " 晚 × " + rooms + " 间，分摊）", a: stayTotal / people, b: stayTotal / people, tagA: "est", tagB: "est" },
-        { k: "餐饮（" + c.days + " 天）", a: food * c.days, b: food * c.days, tagA: "est", tagB: "est" },
-        { k: "市内交通（" + c.days + " 天）", a: c.localPerDay * c.days, b: c.localPerDay * c.days, tagA: "est", tagB: "est" },
-        { k: "门票", a: c.tickets, b: c.tickets, tagA: "est", tagB: "est" },
-        { k: "体验项目", a: c.experiences, b: c.experiences, tagA: "est", tagB: "est" }
+        { k: "大交通（往返）", vals: travelers.map(function (t) { return t.rail || 0; }), tags: travelers.map(function (t) { return t.tag || "est"; }) },
+        { k: "住宿（" + c.nights + " 晚 × " + rooms + " 间，分摊）", vals: travelers.map(function () { return stayTotal / people; }), tags: travelers.map(function () { return "est"; }) },
+        { k: "餐饮（" + c.days + " 天）", vals: travelers.map(function () { return food * c.days; }), tags: travelers.map(function () { return "est"; }) },
+        { k: "市内交通（" + c.days + " 天）", vals: travelers.map(function () { return c.localPerDay * c.days; }), tags: travelers.map(function () { return "est"; }) },
+        { k: "门票", vals: travelers.map(function () { return c.tickets; }), tags: travelers.map(function () { return "est"; }) },
+        { k: "体验项目", vals: travelers.map(function () { return c.experiences; }), tags: travelers.map(function () { return "est"; }) },
+        { k: "组合内交通", vals: travelers.map(function () { return c.groupTransport || 0; }), tags: travelers.map(function () { return "est"; }) }
       ];
-      var subA = 0, subB = 0;
-      rows.forEach(function (r) { subA += r.a; subB += r.b; });
-      var bufA = subA * c.bufferPct / 100, bufB = subB * c.bufferPct / 100;
+      var totals = travelers.map(function (_, i) {
+        return rows.reduce(function (sum, r) { return sum + r.vals[i]; }, 0);
+      });
+      var bufs = totals.map(function (v) { return v * c.bufferPct / 100; });
 
       out.innerHTML = "";
       var table = el("table", "cost-table");
       var thead = el("thead"), htr = el("tr");
       htr.appendChild(el("th", null, "项目"));
-      htr.appendChild(el("th", null, c.rail.labelA));
-      htr.appendChild(el("th", null, c.rail.labelB));
-      htr.appendChild(el("th", null, "数据性质"));
+      travelers.forEach(function (t) { htr.appendChild(el("th", null, t.label)); });
+      htr.appendChild(el("th", null, "说明"));
       thead.appendChild(htr);
       table.appendChild(thead);
       var tb = el("tbody");
       rows.forEach(function (r) {
         var tr = el("tr");
         tr.appendChild(el("td", null, r.k));
-        [[r.a, r.tagA], [r.b, r.tagB]].forEach(function (pair) {
+        travelers.forEach(function (_, i) {
           var td = el("td", "num");
-          td.appendChild(document.createTextNode(money(pair[0]) + " "));
-          td.appendChild(el("span", "badge badge-inline " + (pair[1] === "real" ? "badge-real" : "badge-est"),
-            pair[1] === "real" ? "实查" : "估算"));
+          td.appendChild(document.createTextNode(money(r.vals[i]) + " "));
+          td.appendChild(badge(r.tags[i]));
           tr.appendChild(td);
         });
-        tr.appendChild(el("td", null, "按侧标注"));
+        tr.appendChild(el("td", null, "共同开销按统一标准"));
         tb.appendChild(tr);
       });
-      var trSub = el("tr", "row-sub");
-      trSub.appendChild(el("td", null, "小计"));
-      trSub.appendChild(el("td", "num", money(subA)));
-      trSub.appendChild(el("td", "num", money(subB)));
-      trSub.appendChild(el("td"));
-      tb.appendChild(trSub);
 
-      var trBuf = el("tr");
-      trBuf.appendChild(el("td", null, "机动 " + c.bufferPct + "%"));
-      trBuf.appendChild(el("td", "num", money(bufA)));
-      trBuf.appendChild(el("td", "num", money(bufB)));
-      trBuf.appendChild(el("td"));
-      tb.appendChild(trBuf);
-
-      var trTotal = el("tr", "row-total");
-      trTotal.appendChild(el("td", null, "人均合计"));
-      trTotal.appendChild(el("td", "num", money(subA + bufA)));
-      trTotal.appendChild(el("td", "num", money(subB + bufB)));
-      trTotal.appendChild(el("td"));
-      tb.appendChild(trTotal);
+      function sumRow(label, values, cls) {
+        var tr = el("tr", cls || null);
+        tr.appendChild(el("td", null, label));
+        values.forEach(function (v) { tr.appendChild(el("td", "num", money(v))); });
+        tr.appendChild(el("td"));
+        tb.appendChild(tr);
+      }
+      sumRow("小计", totals, "row-sub");
+      sumRow("机动 " + c.bufferPct + "%", bufs, null);
+      var grand = totals.map(function (v, i) { return v + bufs[i]; });
+      sumRow("每人合计", grand, "row-total");
 
       var trAll = el("tr", "row-all");
       var tdAll = el("td");
-      tdAll.colSpan = 4;
+      tdAll.colSpan = travelers.length + 2;
       var allCell = el("div", "all-cell");
-      allCell.appendChild(el("span", "all-label", "两人总支出"));
-      allCell.appendChild(el("strong", "all-amt", money(subA + bufA + subB + bufB)));
+      allCell.appendChild(el("span", "all-label", "所有人总支出"));
+      allCell.appendChild(el("strong", "all-amt", money(grand.reduce(function (a, b) { return a + b; }, 0))));
       tdAll.appendChild(allCell);
       trAll.appendChild(tdAll);
       tb.appendChild(trAll);
@@ -798,41 +813,37 @@
       cscroll.appendChild(table);
       out.appendChild(cscroll);
 
-      var bar = el("p", "budget-hint");
-      var sideA = subA + bufA, sideB = subB + bufB;
       var mode = T.meta.budgetMode || "per_person";
+      var cl = clusterOfPlan(p);
       function rel(value, cap) {
         return value <= cap ? "在预算内，余 " + money(cap - value) : "超出 " + money(value - cap);
       }
       var text = "";
       if (mode === "shared" && T.meta.budgetCap) {
-        var totalCap = T.meta.budgetCap;
-        var totalSpend = sideA + sideB;
-        text = "两人合计 " + money(totalSpend) + "，对照共同预算 " + money(totalCap) + "：" +
-          (totalSpend <= totalCap
-            ? "在预算内，余 " + money(totalCap - totalSpend)
-            : "超出 " + money(totalSpend - totalCap)) +
-          "（" + c.rail.labelA + " " + money(sideA) + " / " + c.rail.labelB + " " + money(sideB) + "）。";
-      } else {
-        var capA = T.meta.budgetCapA != null ? T.meta.budgetCapA : T.meta.budgetCap;
-        var capB = T.meta.budgetCapB != null ? T.meta.budgetCapB : capA;
-        if (capA != null || capB != null) {
-          capA = capA == null ? capB : capA;
-          capB = capB == null ? capA : capB;
-          if (mode === "uniform") {
-            var high = Math.max(capA, capB), low = Math.min(capA, capB);
-            text = "统一上限 " + money(high) + "：" + c.rail.labelA + " " + rel(sideA, high) +
-              "；" + c.rail.labelB + " " + rel(sideB, high) +
-              "。按较低上限 " + money(low) + " 两人合计超出 " +
-              money(Math.max(0, sideA - low) + Math.max(0, sideB - low)) + "。";
-          } else {
-            text = "各自上限：" + c.rail.labelA + " " + money(capA) + " " + rel(sideA, capA) +
-              "；" + c.rail.labelB + " " + money(capB) + " " + rel(sideB, capB) + "。";
-          }
+        var totalSpend = grand.reduce(function (a, b) { return a + b; }, 0);
+        text = "所有人合计 " + money(totalSpend) + "，对照共同预算 " + money(T.meta.budgetCap) + "：" +
+          (totalSpend <= T.meta.budgetCap ? "在预算内，余 " + money(T.meta.budgetCap - totalSpend)
+            : "超出 " + money(totalSpend - T.meta.budgetCap)) + "。";
+      } else if (mode === "uniform") {
+        var valid = caps.filter(function (v) { return v != null; });
+        if (valid.length) {
+          var high = Math.max.apply(null, valid), low = Math.min.apply(null, valid);
+          text = "统一上限 " + money(high) + "：" + travelers.map(function (t, i) {
+            return t.label + " " + rel(grand[i], high);
+          }).join("；") + "。按较低上限 " + money(low) + " 合计超出 " +
+            money(grand.reduce(function (sum, v) { return sum + Math.max(0, v - low); }, 0)) + "。";
         }
+      } else {
+        var parts = [];
+        travelers.forEach(function (t, i) {
+          if (caps[i] != null) parts.push(t.label + " 上限 " + money(caps[i]) + "，" + rel(grand[i], caps[i]));
+        });
+        if (parts.length) text = "各自上限：" + parts.join("；") + "。";
       }
+      if (cl && cl.userPicked) text += " 目的地不受预算限制。";
       if (text) {
-        bar.textContent = text;
+        var bar = el("p", "budget-hint");
+        bar.textContent = text + " 游玩、门票与组合内交通按最低消费能力者标准计算。";
         out.appendChild(bar);
       }
     }

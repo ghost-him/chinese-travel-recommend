@@ -8,23 +8,25 @@
 为什么多源：单一图源有硬性限速（Commons 约 1 次/3.5 秒），串行抓几十张要十几分钟。
 把请求分散到不同站点、各自遵守自己的限速，就能并行推进，还能拿到风格不同的图。
 
-图源（2026-11-18 全部实测免 key 可用）：
-  commons     Wikimedia Commons 关键词搜索         限速 3.5 s/次
-  commonscat  Commons 分类（Category:<词>）成员    与 commons 共用限速
-  openverse   Openverse v1（聚合 Flickr/博物馆等） 限速 1.2 s/次（偶发 0 结果，会熔断）
-  wikipedia   维基条目首图（zh 优先、en 兜底）     限速 1.5 s/次
+图源（六个，免 key）：
+  web         百度图片检索（中文地名/实景）          限速 1.5 s/次
+  bing        必应图片检索（英文/中文都能搜）         限速 1.5 s/次
+  commons     Wikimedia Commons 关键词搜索            限速 3.5 s/次
+  commonscat  Commons 分类（Category:<词>）成员       与 commons 共用限速
+  openverse   Openverse v1（聚合 Flickr/博物馆等）    限速 1.2 s/次
+  wikipedia   维基条目首图（zh 优先、en 兜底）        限速 1.5 s/次
 
-实测不可用（别再试）：Library of Congress（Cloudflare 403）、The Met（API 2026-10 下线）、
-Art Institute of Chicago（Cloudflare 403）、Pexels/Pixabay/Unsplash（需 key）。
+默认顺序 `web,bing,commons,commonscat,wikipedia,openverse`：先用公开搜索引擎拿到数量充足的实景图，
+再用 Commons/维基补权威图。需要 key 的 Pexels/Pixabay/Unsplash 和已失效的博物馆 API 不要接。
 
 用法：
   uv run --no-project scripts/fetch_images_search.py <输出目录> <清单.tsv> [--workers 3]
+  uv run --no-project scripts/fetch_images_search.py images m.tsv --sources web,bing
   uv run --no-project scripts/fetch_images_search.py images m.tsv --sources commonscat,wikipedia
-  uv run --no-project scripts/fetch_images_search.py images m.tsv --sources commons --workers 5 --sleep 2.5
 
 清单每行（| 分隔，可带 # 注释）：
-  changbaishan-tianchi|Changbai Mountain Tianchi|3
-  字段：<slug 前缀> | <检索词> | <要几张，默认 2> [| <最小宽度，默认 1000>]
+  changbaishan-tianchi|Changbai Mountain Tianchi|4
+  字段：<slug 前缀> | <检索词> | <要几张，默认 4> [| <最小宽度，默认 1000>]
 
 产物：<slug>-N.jpg、manifest.json。脚本只负责下载与去重；
 **图片是否为目标地点，由 AI 抓完后逐张看图确认**（脚本不做题材判断）。
@@ -33,6 +35,7 @@ Art Institute of Chicago（Cloudflare 403）、Pexels/Pixabay/Unsplash（需 key
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -41,6 +44,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 
 from PIL import Image
 
@@ -48,6 +52,7 @@ from lib import UA_BROWSER, Client, md5_of
 
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 OPENVERSE_API = "https://api.openverse.org/v1/images/"
+BING_API = "https://www.bing.com/images/async"
 WIKI_APIS = [
     ("https://zh.wikipedia.org/w/api.php", "zh"),
     ("https://en.wikipedia.org/w/api.php", "en"),
@@ -56,7 +61,8 @@ OK_MIME = {"image/jpeg", "image/png"}
 BAD_WORDS = ("map", "diagram", "logo", "icon", "seal", "flag", "chart", "svg", "coat of arms",
              "banner", "screenshot", "signature")
 # 每个图源自己的最小请求间隔（秒）；互不共享，所以能并行
-MIN_INTERVAL = {"commons": 3.5, "commonscat": 3.5, "openverse": 1.2, "wikipedia": 1.5, "web": 1.5}
+MIN_INTERVAL = {"commons": 3.5, "commonscat": 3.5, "openverse": 1.2, "wikipedia": 1.5,
+                "web": 1.5, "bing": 1.5}
 
 
 class Throttle:
@@ -227,6 +233,33 @@ class Fetcher:
             })
         return items
 
+    # ---------- 图源 6：公开网络（必应图片检索） ----------
+    def bing(self, term: str, want: int, min_width: int) -> list[dict]:
+        self.throttle["bing"].wait()
+        raw = self.client.get(BING_API, {
+            "q": term, "first": "1", "count": str(max(want * 6, 24)),
+            "adlt": "off", "qft": "+filterui:imagesize-large",
+        }, headers={"Accept-Language": "zh-CN,zh;q=0.9", "Referer": "https://www.bing.com/images/search"})
+        text = html.unescape(raw.decode("utf-8", "ignore"))
+        urls = re.findall(r'"murl":"(.*?)"', text) or re.findall(r'murl&quot;:&quot;(.*?)&quot;', text)
+        items: list[dict] = []
+        seen: set[str] = set()
+        for url in urls:
+            url = url.replace("\\/", "/")
+            if not url.startswith("http") or url in seen:
+                continue
+            if any(word in url.lower() for word in BAD_WORDS):
+                continue
+            seen.add(url)
+            items.append({
+                "url": url,
+                "title": term,
+                "page": "https://www.bing.com/images/search?q=" + quote(term),
+            })
+            if len(items) >= max(want * 2, 6):
+                break
+        return items
+
     def search(self, source: str, term: str, want: int, min_width: int) -> list[dict]:
         if source in self.dead:
             return []
@@ -240,11 +273,13 @@ class Fetcher:
             self.failures[source] = 0
         return items
 
-    def download(self, item: dict) -> bytes | None:
+    def download(self, item: dict, min_width: int = 0) -> bytes | None:
         try:
             blob = self.media.get(item["url"], headers={"Referer": item["page"]})
             probe = Image.open(BytesIO(blob))
             probe.verify()
+            if min_width and probe.width < min_width:
+                return None
         except Exception:
             return None
         return blob if len(blob) >= 4096 else None
@@ -255,8 +290,8 @@ def main() -> int:
     parser.add_argument("out_dir")
     parser.add_argument("manifest")
     parser.add_argument("--sleep", type=float, default=None, help="兼容旧参数：覆盖 commons 的间隔")
-    parser.add_argument("--sources", default="commons,commonscat,wikipedia,openverse,web",
-                        help="逗号分隔：commons,commonscat,wikipedia,openverse,web")
+    parser.add_argument("--sources", default="web,bing,commons,commonscat,wikipedia,openverse",
+                        help="逗号分隔：web(百度),bing(必应),commons,commonscat,wikipedia,openverse；默认先公开搜索引擎")
     parser.add_argument("--workers", type=int, default=3, help="并发任务数（每个图源内部仍各自限速）")
     args = parser.parse_args()
 
@@ -294,7 +329,7 @@ def main() -> int:
         jobs.append((
             re.sub(r"\s+", "", parts[0]),
             parts[1],
-            int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 2,
+            int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 4,
             int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 1000,
         ))
 
@@ -330,7 +365,7 @@ def main() -> int:
         for source, item in ordered:
             if got >= want:
                 break
-            blob = fetcher.download(item)
+            blob = fetcher.download(item, min_width)
             if not blob:
                 continue
             with results_lock:

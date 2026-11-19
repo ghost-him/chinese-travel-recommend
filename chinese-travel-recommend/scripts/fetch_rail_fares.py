@@ -10,7 +10,7 @@
   uv run --no-project scripts/fetch_rail_fares.py 广州南 潮汕 2026-12-02 O
 
 输出（TSV）：车次 / 出发站 / 时刻 / 历时 / 二等座 / 一等座 / 商务座 / 无座
-说明：12306 预售期约 15 天，超出窗口返回空——这是「尚未开售」，不是「无车」。
+说明：12306 预售期约 14 天，超出窗口返回空——这是「尚未开售」，不是「无车」。
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def main() -> int:
     probe = query(client, "leftTicket/query", params)
     if probe is None:
         info(f"# {args.from_name} -> {args.to_name} {travel_date}：12306 返回的是 HTML 页而不是 JSON。")
-        info("# 这通常意味着超出 15 天预售期（尚未开售）或触发风控，**不是「无车」**。")
+        info("# 这通常意味着超出约 14 天预售期（尚未开售）或触发风控，**不是「无车」**。")
         info("# 处理方式：开售后再查；本次报价改用 estimated 区间并注明未开售。")
         return 3
     endpoint = probe.get("c_url") or "leftTicket/queryG"

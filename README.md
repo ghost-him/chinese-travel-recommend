@@ -21,7 +21,7 @@ Built for travel inside mainland China: it knows the 12306 presale window, Chine
 | "I'm in Beijing, my friend is in Guangzhou — where should we meet?" | Asks how to split the budget first (shared / per-person caps / uniform cap) instead of forcing one person's cap on the other |
 | "¥4,000 per person — is that enough?" | Drops destinations that fail the budget check; **places you named are kept**, with the overrun spelled out |
 | "We talked about going to Dunhuang" | Dunhuang must appear as a candidate with its own complete plan |
-| "I've already been to half of these" | Shows the shortlist before digging; visited/disliked clusters are replaced as a whole |
+| "I've already been to half of these" | Shows the shortlist before digging; confirmed visited/disliked clusters are replaced as a whole |
 | "Harbin in July" | Runs the season gate; Ice World is flagged off-season instead of being quietly scheduled |
 
 Not a good fit: a plain list of attractions (too heavy), in-city routing only (a maps app is faster), or booking on your behalf (this skill checks prices, it does not purchase).
@@ -37,12 +37,12 @@ my friend from Guangzhou South, budget ¥4,000 per person.
 
 The agent asks a few rounds of questions — not twelve at once:
 
-1. **Question 0**: have you and your companion already talked about places you want to go? Any shortlist? Everything mentioned must become a candidate.
-2. **Five required fields**: origin (city + station/airport), companions and their origins, dates and float, total days, budget cap.
-3. **Budget mode**: shared total / per-person caps / uniform cap — two people rarely have the same distance or income.
+1. **Question 0**: have you and your companion already talked about places you want to go? Any shortlist? Every place mentioned becomes a candidate; closed or already-visited ones get a second confirmation before a full plan is written.
+2. **Five required fields**: origin (city + station/airport), companions and their origins, departure date, return date (trip length is derived), budget cap.
+3. **Budget mode**: shared total / per-person caps / uniform cap — travelers rarely have the same distance or income.
 4. **Map mode**: offline SVG (default, opens by double-click) or an AMap JS API key (needs network, user-provided).
 
-Then it restates all six confirmations and waits for your OK. **Missing any field stops the process — it will not fill gaps with sample data.**
+Then it restates all seven confirmations (including map mode) and waits for your OK. **Missing any field stops the process — it will not fill gaps with sample data.**
 
 Requirements: [`uv`](https://docs.astral.sh/uv/) and Python 3.11+. Every script declares its own dependencies in a PEP 723 header, so `uv` installs them on the fly; no `pip install`, no Node, no Git Bash required.
 
@@ -54,10 +54,11 @@ Requirements: [`uv`](https://docs.astral.sh/uv/) and Python 3.11+. Every script 
 flowchart TD
   A[Question 0<br/>existing shortlist] --> B[5 required fields<br/>+ budget mode + map mode]
   B --> C[Season gate<br/>off-season / closed first]
-  C --> D[Hard filter<br/>transit / budget / climate]
+  C --> R[Restate confirmation<br/>7 items including map]
+  R --> D[Hard filter<br/>transit / budget / climate]
   D --> E[Clustering<br/>same or adjacent province]
   E --> F[Sub-agent pre-check<br/>per attraction: hours / entry / booking]
-  F --> G[Shortlist review<br/>visited or unwanted → replace cluster]
+  F --> G[Shortlist review<br/>confirmed visited/unwanted → replace; no reply = unconfirmed]
   G --> H[Weighted scoring<br/>overrun by budget mode]
   H --> I[Local first-hand research<br/>pitfalls / timing / local food]
   I --> J[Itinerary + attraction cards]
@@ -70,9 +71,9 @@ flowchart TD
 
 Non-negotiable steps:
 
-- **Season gate** — every cluster carries `seasonStatus` (`ok` / `off` / `closed`); off-season is marked, closed is dropped.
+- **Season gate** — every cluster carries `seasonStatus` (`ok` / `off` / `closed`); off-season is marked; closed is dropped unless the user named it, in which case a second confirmation decides whether a plan is written.
 - **Pre-check** — prompt at `chinese-travel-recommend/prompts/season-factcheck.md`, verified **per attraction**: open today, which gate, last entry, booking method, season mismatch.
-- **Shortlist review** — the cluster list goes to you before research; visited or unwanted clusters are replaced whole.
+- **Shortlist review** — the cluster list goes to you before research; confirmed visited/unwanted clusters are replaced whole, while no-reply stays with an explicit "unconfirmed" note.
 - **Final review** — prompt at `chinese-travel-recommend/prompts/final-review.md`; a `FAIL` must be fixed before packaging.
 
 ---
@@ -85,7 +86,7 @@ travel-report/
 ├─ css/style.css
 ├─ js/data.js          # ★ the only file to edit: profile / clusters / itinerary / fares
 ├─ js/app.js           # rendering logic
-├─ images/             # 4–6 per attraction (6–10 for landmarks), no attribution needed
+├─ images/             # 4–6 per attraction (6–10 for landmarks); shortfalls topped up before delivery, no attribution needed
 └─ README.md           # sources, assumptions, how to edit
 ```
 
@@ -121,7 +122,7 @@ Paths are relative to this README; the skill itself lives in `chinese-travel-rec
 | `attractions.py` | Query the library by province/type/tag/keyword; exclude visited, find alternatives; `--all --format compact` dumps the whole pool |
 | `fetch_rail_fares.py` | 12306 trains and per-class fares, with cookie handling and real departure-station checks |
 | `fetch_images.py` | Bulk Commons download by exact file name; rate limit, retry, md5 dedupe |
-| `fetch_images_search.py` | Multi-source image search (Commons / Commons categories / Openverse / Wikipedia lead image); no topic filtering — the AI inspects every image |
+| `fetch_images_search.py` | Multi-source image search (Baidu / Bing / Commons / Commons categories / Openverse / Wikipedia lead image), public search engines first; no topic filtering — the AI inspects every image |
 | `fetch_geo.py` | Name → coordinates (Wikipedia coordinates, Wikidata P625 fallback) |
 | `optimize_images.py` | Downscale/compress images before packaging |
 | `verify_report.py` | Static self-check: files, images, duplicate images, external links, placeholders, price structure |
@@ -176,10 +177,11 @@ uv run --no-project scripts/package_report.py ../travel-report out.zip
 ## Known limits
 
 - **The SVG map is a schematic projection**, not tiles: it shows relative positions and how segments connect, not streets. For a real basemap use `mapMode: "amap"` with your own key — it needs network and `file://` may hit the key's referer allowlist.
-- **12306 presale is about 15 days**: for later dates the report quotes a comparable recent fare, labels the reference date, and warns that prices can move once sales open.
+- **12306 presale is about 14 days**: for later dates the report quotes the same train's most recent available fare, labels the reference date, and notes that rail fares are usually stable; confirm seat availability once sales open. Flights, hotels and tickets can move.
 - **Flights, hotels and some tickets are estimates**: marked `estimated` with ranges; no fake precision.
 - **Attraction status changes**: strong winds close the Tianchi, museums close temporarily, cable cars go into maintenance. Status is as-of-check-time; confirm official notices before departure.
-- **Deep single-city travel** is not its strength: the value is comparing several candidate clusters.
+- **Itineraries are approximate, not minute-level**: opening hours, transport and queues can change. Treat the report as a skeleton and cross-check recent notes on Xiaohongshu, Dianping and other travel platforms before booking.
+- **Deep single-city travel** is supported for a few cities with enough depth (Beijing, Xi'an, Chengdu, Hangzhou), but the skill is optimized for comparing candidate clusters; single-city itineraries are still approximate.
 
 ---
 

@@ -94,7 +94,7 @@ def main() -> int:
         if not meta.get("source"):
             warn("meta.source 缺失：未写明票价来源")
         if meta.get("isTemplate"):
-            warn("meta.isTemplate = true：仍是模板占位数据，对外分享前请替换")
+            warn("meta.isTemplate = true：仍是模板占位数据，交付前请替换")
         if meta.get("budgetMode") not in ("shared", "per_person", "uniform"):
             warn("meta.budgetMode 未记录：应写 shared / per_person / uniform")
         if meta.get("mapMode") == "amap" and not meta.get("amapKey"):
@@ -110,6 +110,8 @@ def main() -> int:
             cities: set[str] = set()
             for cluster in clusters:
                 name = cluster.get("name", "?")
+                if str(name).endswith("群"):
+                    err(f"页面展示名「{name}」以「群」结尾；内部群名请放 internalName")
                 if not cluster.get("style") or not cluster.get("link"):
                     err(f"群「{name}」缺风格标签或群内串联说明")
                 style = cluster.get("style")
@@ -126,6 +128,8 @@ def main() -> int:
                     err(f"群「{name}」seasonStatus 非法：{cluster.get('seasonStatus')}")
                 if cluster.get("seasonStatus") == "off" and not cluster.get("seasonNote"):
                     err(f"群「{name}」标了非当季但没写原因")
+                if cluster.get("seasonStatus") == "closed" and not cluster.get("seasonNote"):
+                    err(f"群「{name}」标了闭园/停运但没写恢复时间")
                 if cluster.get("userPicked") and cluster.get("overBudget") is None:
                     warn(f"群「{name}」是用户提过的候选，但没有记录 overBudget（超预算金额）")
             ok(f"{len(clusters)} 个地点群 / {len(styles)} 种风格 / {len(cities)} 座城市")
@@ -136,10 +140,14 @@ def main() -> int:
             for cluster in clusters:
                 name = cluster.get("name", "")
                 matched = [key for key, label in labels.items() if label.startswith(name)]
-                if not matched:
+                closed = cluster.get("seasonStatus") == "closed"
+                confirmed = cluster.get("userConfirmedPlan") is True
+                if closed:
+                    if matched and not confirmed:
+                        err(f"群「{name}」标了闭园/停航，有方案但没有 userConfirmedPlan: true")
+                    # closed + 无方案：允许，作为原因卡
+                elif not matched:
                     err(f"群「{name}」没有对应的完整方案（plans 里缺 clusterLabel 以它开头的条目）")
-                elif cluster.get("seasonStatus") == "closed":
-                    err(f"群「{name}」标了闭园/停航，却仍有方案：{', '.join(matched)}")
             for key, label in labels.items():
                 if label and not any(label.startswith(cluster.get("name", "")) for cluster in clusters):
                     err(f"方案「{key}」的 clusterLabel「{label}」对不上任何地点群")
@@ -155,6 +163,21 @@ def main() -> int:
                     err(f"[{key}] 景点「{name}」缺 entry（从哪个门进）")
                 if status in ("off-season", "closed") and not poi.get("statusNote"):
                     err(f"[{key}] 景点「{name}」标了 {status} 但没写 statusNote")
+
+        for key, plan in plans.items():
+            costs = plan.get("costs") or {}
+            travelers = costs.get("travelers") or []
+            if not travelers:
+                warn(f"[{key}] costs.travelers 为空：费用表无法按人计算")
+            else:
+                for idx, t in enumerate(travelers):
+                    if t.get("rail") is None:
+                        warn(f"[{key}] costs.travelers[{idx}] 缺 rail（出发地到组合开始位置的往返路费）")
+            required_cost_fields = ("stayPerNight", "nights", "rooms", "foodPerDay", "days",
+                                    "localPerDay", "groupTransport", "tickets", "experiences", "bufferPct")
+            missing_cost = [field for field in required_cost_fields if costs.get(field) is None]
+            if missing_cost:
+                warn(f"[{key}] costs 缺字段：{', '.join(missing_cost)}；页面与 calc_budget.py 无法用同一公式复算")
 
         for key, plan in plans.items():
             if not ((plan.get("geo") or {}).get("cities")):
@@ -187,10 +210,10 @@ def main() -> int:
                 landmark = any(t in ("世遗", "5A", "地标", "博物馆", "必看") for t in poi_tags)
                 target = 6 if landmark else 4
                 if not imgs:
-                    warn(f"[{key}] 景点「{poi.get('name')}」没有实景图：页面会显示占位说明（小众点位搜不到图属正常）")
+                    warn(f"[{key}] 景点「{poi.get('name')}」没有实景图：必须补抓；确实无公开来源时才保留占位说明并让用户确认")
                 elif len(imgs) < target:
                     label = "，地标/世遗/5A 目标 6–10" if landmark else ""
-                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 {target} 张{label}；搜不到也照常展示）")
+                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 {target} 张{label}；低于目标需补抓）")
                 if len(imgs) < target:
                     slug = stem(imgs[0]).rsplit("-", 1)[0] if imgs else f"topup-{key}-{poi_count}"
                     gaps.append((slug, poi.get("name", ""), target - len(imgs)))

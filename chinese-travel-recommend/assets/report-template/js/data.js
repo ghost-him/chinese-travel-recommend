@@ -15,13 +15,12 @@ window.TRIP = {
     tripEnd: "2026-02-04",
     tripDays: 4,
     budgetCap: 2700,
-    budgetCapA: 2700,
-    budgetCapB: 2700,
+    budgetCaps: [2700, 2500],
     budgetMode: "per_person",
     mapMode: "svg",
     amapKey: "",
     amapSecurity: "",
-    chips: ["4 天 3 晚", "示例出发地 A + B", "人均 ¥2k–3k", "推荐单位：地点群"],
+    chips: ["4 天 3 晚", "示例出发地 · 多人", "人均 ¥2k–3k", "推荐单位：地点组合"],
     currency: "CNY",
     source: "中国铁路 12306 官方接口（queryG / queryTicketPrice 实查）",
     presale: {
@@ -34,11 +33,12 @@ window.TRIP = {
   /* ---------------- 1. 需要用户补充的画像字段 ---------------- */
   profileFields: [
     { key: "origin", label: "出发城市 / 车站或机场", why: "决定大交通方式与时长，是第一道硬条件", example: "上海虹桥", required: true },
-    { key: "companionFrom", label: "同行者所在地 + 人数 + 关系", why: "多地出发时要找会合成本最低的目的地群", example: "广州南，1 人，朋友", required: true },
-    { key: "dates", label: "出行日期与可浮动范围", why: "假期前后价差可达数倍", example: "2026-02-01 ~ 02-04，可浮动 1 天", required: true },
-    { key: "duration", label: "假期长度（含在途）", why: "决定群里有几个城市", example: "4 天 3 晚", required: true },
-    { key: "budget", label: "预算上限（人均 / 总）", why: "先定上限再选群", example: "人均 3000 元（含大交通）", required: true },
-    { key: "budgetMode", label: "预算口径：共同 / 各自 / 统一", why: "多人不同上限时决定怎么算超支", example: "各自上限：A ¥4000 / B ¥3000", required: true },
+    { key: "companionFrom", label: "同行者所在地 + 人数 + 关系", why: "多地出发时要找会合成本最低的地点组合", example: "广州南，多人，朋友", required: true },
+    { key: "dates", label: "出发 / 返程日期（可浮动）", why: "假期前后价差可达数倍；天数由日期自动算", example: "2026-02-01 → 02-04，可浮动 1 天", required: true },
+    { key: "duration", label: "天数（由出发/返程日期自动计算）", why: "决定组合里有几个城市；不需要单独问", example: "4 天 3 晚（自动）", required: false },
+    { key: "budget", label: "预算上限（人均 / 总）", why: "先定上限再选组合", example: "人均 3000 元（含大交通）", required: true },
+    { key: "budgetMode", label: "预算口径：共同 / 各自 / 统一", why: "多人不同上限时决定怎么算超支", example: "各自上限：3 人分别 ¥4000 / ¥3000 / ¥2500", required: true },
+    { key: "mapMode", label: "地图模式：离线 SVG / 高德在线", why: "高德在线需要用户自己的 web 端 JS API key", example: "离线 SVG", required: true },
     { key: "transport", label: "交通偏好与可接受最长在途", why: "决定高铁还是飞机、能否跨城", example: "高铁优先，单程 ≤ 7 小时", required: false },
     { key: "interests", label: "兴趣权重", why: "决定评分权重", example: "人文 40% / 美食 40% / 摄影 20%", required: false },
     { key: "pace", label: "体力与节奏", why: "决定每天排几个点", example: "中等，日均 1.2 万步", required: false },
@@ -49,8 +49,8 @@ window.TRIP = {
   ],
 
   sampleProfile: {
-    origin: "示例：出发地 A",
-    companion: "示例：同行者 B · 1 人 · 朋友",
+    origin: "示例：上海虹桥",
+    companion: "示例：同行者 · 多人 · 朋友",
     dates: "示例：2026-02-01 → 02-04（4 天 3 晚）",
     budget: "示例：人均 ¥3000",
     style: "示例：人文 + 美食，中等节奏"
@@ -61,8 +61,8 @@ window.TRIP = {
     { key: "season", label: "季节体感", w: 18 },
     { key: "culture", label: "人文风土", w: 20 },
     { key: "food", label: "美食密度", w: 18 },
-    { key: "access", label: "双城可达", w: 16 },
-    { key: "link", label: "群内串联", w: 10 },
+    { key: "access", label: "跨城可达", w: 16 },
+    { key: "link", label: "组合内串联", w: 10 },
     { key: "cost", label: "预算友好", w: 10 },
     { key: "crowd", label: "人流舒适", w: 8 }
   ],
@@ -73,50 +73,50 @@ window.TRIP = {
     { id: "family", name: "亲子 / 自然", w: { season: 22, culture: 8, food: 8, access: 18, link: 14, cost: 12, crowd: 18 } }
   ],
 
-  /* ---------------- 3. 5–7 个风格互斥的地点群（必填，每个群都要有对应方案） ---------------- */
+  /* ---------------- 3. 至少 5 个风格互斥的地点（必填，每个推荐地点都要有对应方案） ---------------- */
   clusters: [
     {
-      id: "c1", name: "示例人文群", style: "人文 · 古城",
+      id: "c1", name: "示例城A · 古城与烟火", internalName: "示例人文群", style: "人文 · 古城",
       cities: ["示例城A", "示例城B"], days: "3–5 天", fit: [3, 5],
       link: "示例城A ↔ 示例城B 动车 30 分钟，¥50",
       seasonStatus: "ok", seasonNote: "示例：当季，白天 15℃ 左右",
-      userPicked: false, overBudget: null,
+      userPicked: false, visited: false, planRequest: null, userConfirmedPlan: false, overBudget: null,
       s: { season: 4, culture: 5, food: 4, access: 4, link: 5, cost: 4, crowd: 4 },
       note: "为什么会进前五：一句话说清「为什么是它」和「为什么不是第二名」。"
     },
     {
-      id: "c2", name: "示例美食群", style: "美食 · 市集",
+      id: "c2", name: "示例城C · 市井与夜宵", internalName: "示例美食群", style: "美食 · 市集",
       cities: ["示例城C", "示例城D"], days: "2–4 天", fit: [2, 4],
       link: "示例城C ↔ 示例城D 城际 25 分钟，¥15",
       seasonStatus: "ok", seasonNote: "示例：全年可去，避开节假日排队",
-      userPicked: false, overBudget: null,
+      userPicked: false, visited: false, planRequest: null, userConfirmedPlan: false, overBudget: null,
       s: { season: 4, culture: 3, food: 5, access: 3, link: 5, cost: 5, crowd: 4 },
       note: "以吃为主线；写清哪座城吃早、哪座城吃夜宵。"
     },
     {
-      id: "c3", name: "示例海滨群", style: "海滨 · 度假",
+      id: "c3", name: "示例城E · 海岸与渡口", internalName: "示例海滨群", style: "海滨 · 度假",
       cities: ["示例城E", "示例城F", "示例城G"], days: "5–7 天", fit: [5, 7],
       link: "E→F 高铁 1h40；F→G 轮渡 40 分钟",
       seasonStatus: "off", seasonNote: "示例：冬季停航/风大，换季再来",
-      userPicked: false, overBudget: null,
+      userPicked: false, visited: false, planRequest: null, userConfirmedPlan: false, overBudget: null,
       s: { season: 2, culture: 3, food: 4, access: 2, link: 4, cost: 3, crowd: 3 },
-      note: "三城同质必须合并成一泳线；4 天窗口不成立。"
+      note: "三城同质必须合并成一条线；4 天窗口不成立。"
     },
     {
-      id: "c4", name: "示例古都群", style: "历史 · 古都",
+      id: "c4", name: "示例城H · 古都与山野", internalName: "示例古都群", style: "历史 · 古都",
       cities: ["示例城H", "示例山I"], days: "4–5 天", fit: [4, 5],
       link: "H 城 → I 山 高铁 35 分钟",
       seasonStatus: "ok", seasonNote: "示例：秋季最好，冬季山岳项目看天气",
-      userPicked: false, overBudget: null,
+      userPicked: false, visited: false, planRequest: null, userConfirmedPlan: false, overBudget: null,
       s: { season: 2, culture: 5, food: 4, access: 3, link: 4, cost: 4, crowd: 3 },
       note: "人文最厚，但冬季体感差；山岳项目受天气影响。"
     },
     {
-      id: "c5", name: "示例冰雪群", style: "冰雪 · 冬季限定",
+      id: "c5", name: "示例城J · 冰雪与温泉", internalName: "示例冰雪群", style: "冰雪 · 冬季限定",
       cities: ["示例城J", "示例镇K"], days: "4–6 天", fit: [4, 6],
       link: "J 城 → K 镇 高铁 1.5 小时",
       seasonStatus: "ok", seasonNote: "示例：12–2 月是冰雪季",
-      userPicked: true, overBudget: 800,
+      userPicked: true, visited: false, planRequest: null, userConfirmedPlan: false, overBudget: 800,
       s: { season: 1, culture: 3, food: 4, access: 2, link: 4, cost: 2, crowd: 2 },
       note: "季节限定，溢价最高；对短假不友好。"
     }
@@ -129,7 +129,7 @@ window.TRIP = {
       name: "示例目的地",
       tagline: "一句话定位 · 一句最有画面感的描述",
       verdict: "模板占位",
-      clusterLabel: "示例人文群 · 主城",
+      clusterLabel: "示例城A · 古城与烟火 · 主城",
       geo: { cities: [
         { name: "示例城A", lat: 31.230, lng: 121.470 },
         { name: "示例城B", lat: 30.270, lng: 120.160 }
@@ -177,7 +177,7 @@ window.TRIP = {
         }
       ],
       extend: {
-        title: "群内扩展：+1 天去邻城",
+        title: "组合内扩展：+1 天去邻城",
         text: "说明多一天去哪、为什么值得、返程怎么走；不占用本次行程。",
         legs: [
           { route: "主城 → 邻城", time: "30 分钟", price: "¥50", note: "车次/船班示例" }
@@ -185,29 +185,34 @@ window.TRIP = {
       },
       transport: {
         out: [
-          { who: "出发地 A", mode: "高铁", train: "G0000", route: "A 站 → 目的地站", time: "09:00 → 13:00", dur: "4h00", price: 300, cls: "二等座" },
-          { who: "出发地 B", mode: "高铁", train: "G0001", route: "B 站 → 目的地站", time: "08:00 → 11:30", dur: "3h30", price: 260, cls: "二等座", note: "备注：为什么选它" }
+          { who: "同行者 1", mode: "高铁", train: "G0000", route: "示例站 1 → 目的地站", time: "09:00 → 13:00", dur: "4h00", price: 300, cls: "二等座" },
+          { who: "同行者 2", mode: "高铁", train: "G0001", route: "示例站 2 → 目的地站", time: "08:00 → 11:30", dur: "3h30", price: 260, cls: "二等座", note: "备注：为什么选它" }
         ],
         back: [
-          { who: "出发地 A", mode: "高铁", train: "G0002", route: "目的地站 → A 站", time: "16:00 → 20:30", dur: "4h30", price: 300, cls: "二等座" }
+          { who: "同行者 1", mode: "高铁", train: "G0002", route: "目的地站 → 示例站 1", time: "16:00 → 20:30", dur: "4h30", price: 300, cls: "二等座" }
         ],
         flights: [
-          { route: "A 机场 → 目的地机场", dur: "约 2h", price: "¥700–1200（估算）", note: "含接驳总耗时与高铁对比" }
+          { route: "示例机场 → 目的地机场", dur: "约 2h", price: "¥700–1200（估算）", note: "含接驳总耗时与高铁对比" }
         ],
         city: "市内交通：哪些点步行可达、打车大概多少钱、公交/地铁怎么坐。"
       },
       costs: {
-        rail: { A: 600, B: 520, labelA: "出发地 A 往返", labelB: "出发地 B 往返" },
+        travelers: [
+          { label: "同行者 1 往返", rail: 600, tag: "est", cap: 2700 },
+          { label: "同行者 2 往返", rail: 520, tag: "est", cap: 2500 }
+        ],
         stayPerNight: 400, nights: 3, rooms: 1,
         foodPerDay: 130, days: 4,
         localPerDay: 35,
+        groupTransport: 80,
         tickets: 50,
         experiences: 100,
         bufferPct: 10,
         notes: [
           "住宿：写清按什么标准估的，元旦/春节可能上浮多少。",
           "门票：写清免费项与收费项。",
-          "体验：写清包含什么、价格区间。"
+          "体验：写清包含什么、价格区间；滑雪/温泉/索道/出海等大额项目单独标价。",
+          "路费逐人不同；游玩、门票、组合内交通按所有人中消费能力最差者的标准计算。"
         ]
       }
     }
