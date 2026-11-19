@@ -24,6 +24,12 @@ cp -r assets/report-template ./travel-report
 # 3. 抓图 + 自检 + 打包
 uv run --no-project scripts/fetch_images.py ./travel-report/images manifest.tsv
 uv run --no-project scripts/verify_report.py ./travel-report
+
+# 3b. 自检/审核报出「图片少于目标」时：生成补抓清单 → 补抓 → 看图 → 写回 imgs
+uv run --no-project scripts/verify_report.py ./travel-report --topup-tsv topup.tsv
+uv run --no-project scripts/fetch_images_search.py ./travel-report/images topup.tsv --sources web,commons
+
+# 4. 复查通过后打包
 uv run --no-project scripts/package_report.py ./travel-report
 ```
 
@@ -63,7 +69,8 @@ uv run --no-project scripts/package_report.py ./travel-report
 ## 自检会拦住什么
 
 - 景点缺介绍、缺门票/时长
-- 图片文件不存在、重复图
+- 图片文件不存在、重复图（同内容不同文件名）
+- **同一张图被两个景点卡片引用**（同一个 `images/xxx` 出现在两个 `pois[].imgs` 里）——会直接判错，必须各点位用各自的实景图
 - 群风格重复、同一城市出现在两个群；群没有对应方案；方案对不上群
 - 每个群缺 `seasonStatus`；`off` 没写原因；`closed` 群还留着方案
 - 每个景点缺 `status` 或 `entry`；`off-season`/`closed` 缺 `statusNote`

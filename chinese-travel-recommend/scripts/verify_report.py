@@ -5,10 +5,12 @@
 # ///
 """静态自检一个旅行报告包。
 
-用法：uv run --no-project scripts/verify_report.py <report-dir>
+用法：uv run --no-project scripts/verify_report.py <report-dir> [--topup-tsv <清单.tsv>]
 
-检查：文件完整 / 数据可加载 / 图片存在 / 无孤儿图 /
-      无重复图 / 无外链资源 / 无占位符 / 车次价格结构 / 季节与预算口径。
+检查：文件完整 / 数据可加载 / 图片存在 / 无孤儿图 / 无重复图 /
+      同一张图不得被两个点位引用 / 无外链资源 / 无占位符 / 车次价格结构 / 季节与预算口径。
+--topup-tsv：把「图片数量低于目标」的点位写成 fetch_images_search.py 可直接吃的清单
+      （普通点位目标 4 张，世遗/5A/地标/博物馆/必看 目标 6 张）。
 退出码：0 全过（可有 warning），1 有 error。
 """
 
@@ -42,6 +44,7 @@ def stem(name: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("report_dir", nargs="?", default=".")
+    parser.add_argument("--topup-tsv", default="", help="把图片不足的点位写成补抓清单（TSV）")
     args = parser.parse_args()
     directory = Path(args.report_dir).resolve()
 
@@ -170,22 +173,46 @@ def main() -> int:
     if trip:
         referenced: set[str] = set()
         poi_count = 0
+        img_owner: dict[str, str] = {}
+        hero_of: dict[str, str] = {}
+        gaps: list[tuple[str, str, int]] = []
         for key, plan in (trip.get("plans") or {}).items():
             if plan.get("hero"):
                 referenced.add(plan["hero"])
+                hero_of.setdefault(plan["hero"], key)
             for poi in plan.get("pois") or []:
                 poi_count += 1
                 imgs = poi.get("imgs") or []
+                poi_tags = poi.get("tags") or []
+                landmark = any(t in ("世遗", "5A", "地标", "博物馆", "必看") for t in poi_tags)
+                target = 6 if landmark else 4
                 if not imgs:
                     warn(f"[{key}] 景点「{poi.get('name')}」没有实景图：页面会显示占位说明（小众点位搜不到图属正常）")
-                elif len(imgs) < 4:
-                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 4–6 张；搜不到也照常展示）")
+                elif len(imgs) < target:
+                    label = "，地标/世遗/5A 目标 6–10" if landmark else ""
+                    warn(f"[{key}] 景点「{poi.get('name')}」只有 {len(imgs)} 张图（目标 {target} 张{label}；搜不到也照常展示）")
+                if len(imgs) < target:
+                    slug = stem(imgs[0]).rsplit("-", 1)[0] if imgs else f"topup-{key}-{poi_count}"
+                    gaps.append((slug, poi.get("name", ""), target - len(imgs)))
                 if not poi.get("intro") or len(poi["intro"]) < 30:
                     err(f"[{key}] 景点「{poi.get('name')}」缺介绍或过短")
                 if not poi.get("ticket") or not poi.get("dur"):
                     err(f"[{key}] 景点「{poi.get('name')}」缺门票或时长")
                 if not poi.get("tip"):
                     warn(f"[{key}] 景点「{poi.get('name')}」没有提示")
+                owner = f"{key}/{poi.get('name')}"
+                seen_here: set[str] = set()
+                for image_id in imgs:
+                    if image_id in seen_here:
+                        err(f"同一景点内重复引用图片：{owner} 的 images/{image_id} 出现两次")
+                        continue
+                    seen_here.add(image_id)
+                    if image_id in img_owner:
+                        err(f"图片跨点位复用：images/{image_id} 同时用于「{img_owner[image_id]}」与「{owner}」")
+                    else:
+                        img_owner[image_id] = owner
+                        if image_id in hero_of:
+                            warn(f"images/{image_id} 既是方案 hero 又出现在「{owner}」的图廊里（建议换一张）")
                 referenced.update(imgs)
             for day in plan.get("days") or []:
                 items = day.get("items") or []
@@ -210,6 +237,15 @@ def main() -> int:
                 if len(sources) < 3:
                     warn(f"[{key}] sources 只有 {len(sources)} 条（建议 ≥3，覆盖预约/票价/限流）")
         ok(f"共 {poi_count} 个景点，引用 {len(referenced)} 张图")
+
+        if args.topup_tsv:
+            dest = Path(args.topup_tsv)
+            body = "\n".join(f"{slug}|{name} 实景|{need}|1200" for slug, name, need in gaps)
+            dest.write_text(
+                "# 图片不足的点位：slug|检索词|要几张|最小宽度（fetch_images_search.py 可直接用）\n" + body + "\n",
+                encoding="utf-8",
+            )
+            ok(f"补抓清单已写入 {dest}（{len(gaps)} 个点位，共缺 {sum(g[2] for g in gaps)} 张）")
 
         for image_id in referenced:
             if stem(image_id) not in by_stem:

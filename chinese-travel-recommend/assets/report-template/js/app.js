@@ -533,7 +533,7 @@
 
     /* 3.4 景点卡片 */
     var poiSec = el("section", "block");
-    poiSec.appendChild(el("h3", "block-title", "值得玩的地方：≥2 张实景图 + 介绍 + 时长 + 门票"));
+    poiSec.appendChild(el("h3", "block-title", "值得玩的地方：实景图（目标 4–6 张，地标 6–10）+ 介绍 + 时长 + 门票"));
     var grid = el("div", "poi-grid");
     p.pois.forEach(function (poi) {
       var card = el("article", "poi");

@@ -528,6 +528,7 @@ travel-report/
 - `file://` 直接可开（不用 ES module、不用 fetch 读本地 JSON）；
 - 图片本地化，`<img>` 必须写 `alt`，`loading="lazy"`；
 - **图片不需要署名**（个人自用，`data.js` 里没有 `credits` 字段）；唯一硬要求：**每张图必须是该地点本身**——抓完由 AI 逐张看图确认，错图删掉重抓，代码不做题材判断；
+- **一张图只能给一个点位用**：同一个 `images/xxx` 不得出现在两个 `pois[].imgs` 里（`verify_report.py` 会报错）。同一方案的 hero 与图廊重复只算警告，但能换就换——用户会认为整份报告在偷懒复用素材；
 - 费用表区分「实查/估算」，并提供人均与总额；
 - 移动端 390px 无横向溢出（表格放滚动容器，网格子项 `min-width:0`）。
 
@@ -580,7 +581,7 @@ travel-report/
 5. 改人数/房价，总额按公式重算，且与 `calc_budget.py` 结果一致；
 6. 390px 下 `document.documentElement.scrollWidth === innerWidth`；
 7. 每个价格旁边能看到查询时间与「实查/估算」标记；
-8. 每个景点都有 60 字以上介绍，且与风土人情呼应；有 `status`（open/off-season/closed/limited）与 `entry`（哪个门进）；非当季/闭园在页面显著报警，不能只藏在提示里；**图片目标 4–6 张，地标/世遗/5A 6–10 张**；凑不到照样出卡、按实际张数展示，小众点位 0 张也可（`imgs: []` + `noImageNote`，页面显示占位说明）；
+8. 每个景点都有 60 字以上介绍，且与风土人情呼应；有 `status`（open/off-season/closed/limited）与 `entry`（哪个门进）；非当季/闭园在页面显著报警，不能只藏在提示里；**图片目标 4–6 张，地标/世遗/5A 6–10 张**；凑不到照样出卡、按实际张数展示，小众点位 0 张也可（`imgs: []` + `noImageNote`，页面显示占位说明）；页面里任何「图片张数」的文案必须与这个口径一致；
 9. 风土人情与景点提示都有本地一手来源；关键结论 ≥2 个独立来源，门票/时间以官方公告为准；
 10. **群数 ≥ 用户点名数 + max(3, 5 − 点名数)，总数 ≥5**（少于 5 个直接不合格）；风格不重复，且**同一群内城市同省或相邻省、任一段 ≤2 小时**；邻近同质城市已合并成群，每段群内交通有时长与票价；页面上群名写成「地点 · 一句吸引人的话」，不出现「XX群」；
 11. 车次发车站与真实站点一致（用 `fetch_rail_fares.py` 复核，别凭记忆）；
@@ -598,8 +599,10 @@ travel-report/
 ### 16. 交付前二次审核 + 打包（硬步骤）
 
 1. 先跑 `verify_report.py`，再按第 15 步逐条过一遍；
-2. 派一个只读子 agent 做最终审核（reviewer），提示词在 `prompts/final-review.md`：把报告目录、预算口径、地图模式、用户候选、预审结果填进去，整份交给它。它负责找「反季推荐、闭园景区、超预算却没说、用户候选缺失、地图/图片坏链、来源不足」，并输出 `PASS` 或 `FAIL + 问题列表`。
+2. 派一个只读子 agent 做最终审核（reviewer），提示词在 `prompts/final-review.md`：把报告目录、预算口径、地图模式、用户候选、预审结果填进去，整份交给它。它负责找「反季推荐、闭园景区、超预算却没说、用户候选缺失、地图/图片坏链、来源不足」，并**必须实际打开图片**核对「数量（普通 4–6 / 地标 6–10）与质量（是否该地点实景、有无水印叠字、是否糊、季节是否冲突）」，同时扫一遍页面里关于图片张数的文案是否还与 4–6 / 6–10 口径一致；输出 `PASS` 或 `FAIL + 问题列表`（图片抽查另起一节，不得省略）。
 3. `FAIL` 就修，修完重跑自检与审核；不允许「审核意见记下了，先交付」。
+   - **图片数量不足必须补抓**：审核或自检报出「少于目标张数」（普通点位 4 张、世遗/地标/5A 6 张）时，先 `uv run --no-project scripts/verify_report.py <dir> --topup-tsv topup.tsv` 生成补抓清单，再 `uv run --no-project scripts/fetch_images_search.py <dir>/images topup.tsv --sources web,commons` 补抓；新图必须逐张看（卫星图、水印、拼图、错景当场删），通过后写回 `imgs`，重跑自检与复审。
+   - 反复补仍凑不到目标的（源站压根没有该点位实景）：保留实际张数，在交付说明里写清「哪些点位不足、缺几张、为什么」，**不能用异地/别处照片凑数**。
 4. 全部通过后打包：
    ```bash
    uv run --no-project scripts/package_report.py <report-dir> <out.zip>
@@ -618,7 +621,7 @@ travel-report/
 | `fetch_rail_fares.py` | 12306 车次 + 各席别实价；自动带 cookie、核对实际发车站；空结果时提示「可能未开售」 | `uv run --no-project scripts/fetch_rail_fares.py 上海虹桥 泉州南 2026-11-25 O` |
 | `fetch_images.py` | Commons 批量抓图；限速、重试、md5 去重、尺寸校验 | `uv run --no-project scripts/fetch_images.py images manifest.tsv --sleep 4` |
 | `fetch_images_search.py` | **多源检索抓图**（Commons 搜索 / Commons 分类 / 维基首图 / Openverse / 百度图片），各自限速 + 熔断 + md5 去重；不做题材判断 | `uv run --no-project scripts/fetch_images_search.py images manifest.tsv` |
-| `verify_report.py` | 报告包静态自检（图片/重复/外链/占位符/价格结构/季节与预算口径） | `uv run --no-project scripts/verify_report.py travel-report` |
+| `verify_report.py` | 报告包静态自检（图片/重复/跨点位复用/外链/占位符/价格结构/季节与预算口径）；`--topup-tsv` 直接生成缺图补抓清单 | `uv run --no-project scripts/verify_report.py travel-report --topup-tsv topup.tsv` |
 | `package_report.py` | 先自检再打 zip，保留顶层目录，排除中间文件 | `uv run --no-project scripts/package_report.py travel-report out.zip` |
 | `optimize_images.py` | 把图片压到可分享体积（长边 ≤1400、JPEG q82）；实测 74.4 MB → 20.6 MB | `uv run --no-project scripts/optimize_images.py travel-report/images` |
 | `fetch_geo.py` | 按名称查经纬度（维基 `prop=coordinates` + Wikidata P625 兜底），输出可粘进 `data.js` 的坐标 | `uv run --no-project scripts/fetch_geo.py geo.tsv --out geo.json` |
